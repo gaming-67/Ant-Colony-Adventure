@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ant Colony Adventure: Combat</title>
+<style>
+  body { margin:0; overflow:hidden; font-family:Arial, sans-serif; }
+  canvas { display:block; margin:0 auto; background:#c2b280; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let gameState = 'menu'; // menu, instructions, playing
+let score = 0;
+let colonyFood = 50;
+let ants = [], foods = [], spiders = [], eggs = [];
+
+// Nest
+const nest = {x:canvas.width/2, y:canvas.height/2, size:30};
+
+// Player
+const player = {x:nest.x, y:nest.y, size:12, speed:2, carrying:false, attackCooldown:0};
+
+// Controls
+const keys = {};
+document.addEventListener('keydown', e=>keys[e.key]=true);
+document.addEventListener('keyup', e=>keys[e.key]=false);
+
+// --- Classes ---
+class Ant{
+  constructor(x,y,type='worker'){
+    this.x=x; this.y=y; this.type=type;
+    this.size=type==='queen'?15:10;
+    this.speed=type==='queen'?0:type==='soldier'?2:1.5;
+    this.target=null;
+  }
+  move(){
+    if(this.type==='queen') return;
+
+    if(this.type==='worker'){
+      if(!this.target || this.target.collected){
+        this.target = foods[Math.floor(Math.random()*foods.length)] || null;
+      }
+      if(this.target){
+        this.goTo(this.target.x,this.target.y);
+        if(this.getDistance(this.target)<5){
+          this.target.collected=true;
+          colonyFood+=5; score++;
+          this.target=null;
+        }
+      }
+    }
+
+    if(this.type==='soldier'){
+      if(spiders.length>0){
+        let closest=spiders[0]; let minDist=this.getDistance(closest);
+        for(let s of spiders){ let d=this.getDistance(s); if(d<minDist){minDist=d; closest=s;} }
+        this.goTo(closest.x,closest.y);
+        if(minDist<this.size+closest.size) spiders.splice(spiders.indexOf(closest),1);
+      }
+    }
+
+    let danger=this.getClosestSpider();
+    if(danger && this.getDistance(danger)<80){
+      let dx=this.x-danger.x, dy=this.y-danger.y, dist=Math.sqrt(dx*dx+dy*dy);
+      this.x+=(dx/dist)*this.speed*1.5;
+      this.y+=(dy/dist)*this.speed*1.5;
+    }
+  }
+  goTo(tx,ty){
+    let dx=tx-this.x, dy=ty-this.y, dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist>0){ this.x+=(dx/dist)*this.speed; this.y+=(dy/dist)*this.speed; }
+  }
+  getDistance(obj){ return Math.sqrt((obj.x-this.x)**2+(obj.y-this.y)**2); }
+  getClosestSpider(){ if(spiders.length===0) return null; let closest=spiders[0]; let minDist=this.getDistance(closest); for(let s of spiders){ let d=this.getDistance(s); if(d<minDist){minDist=d; closest=s;} } return closest; }
+  draw(){
+    ctx.fillStyle=this.type==='worker'?'#333':this.type==='soldier'?'#1e90ff':'#800080';
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.stroke();
+  }
+}
+
+class Food{ constructor(x,y){ this.x=x; this.y=y; this.size=6; this.collected=false; } draw(){ ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='darkred'; ctx.stroke(); } }
+
+class Spider{
+  constructor(x,y){ this.x=x; this.y=y; this.size=12; this.speed=1.2; this.health=1; }
+  move(){
+    if(ants.length===0) return;
+    let target=ants[Math.floor(Math.random()*ants.length)];
+    let dx=target.x-this.x, dy=target.y-this.y, dist=Math.sqrt(dx*dx+dy*dy);
+    this.x+=(dx/dist)*this.speed; this.y+=(dy/dist)*this.speed;
+    if(dist<this.size+target.size) ants.splice(ants.indexOf(target),1);
+  }
+  draw(){ ctx.fillStyle='darkred'; ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='black'; ctx.stroke(); }
+}
+
+class Egg{
+  constructor(){ this.x=nest.x+(Math.random()*20-10); this.y=nest.y+(Math.random()*20-10); this.size=5; this.timer=0; this.hatchTime=600; }
+  update(){ this.timer++; if(this.timer>=this.hatchTime){ ants.push(new Ant(nest.x+Math.random()*20-10,nest.y+Math.random()*20-10,'worker')); eggs.splice(eggs.indexOf(this),1); } }
+  draw(){ ctx.fillStyle='orange'; ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='brown'; ctx.stroke(); }
+}
+
+// --- Spawn functions ---
+function spawnAnt(type='worker'){ ants.push(new Ant(nest.x+Math.random()*20-10,nest.y+Math.random()*20-10,type)); }
+function spawnFood(){ foods.push(new Food(Math.random()*canvas.width,Math.random()*canvas.height)); }
+function spawnSpider(){ spiders.push(new Spider(Math.random()*canvas.width,Math.random()*canvas.height)); }
+
+// --- Initial setup ---
+function initGame(){
+  score=0; colonyFood=50; ants=[]; foods=[]; spiders=[]; eggs=[];
+  spawnAnt('queen'); for(let i=0;i<5;i++) spawnAnt();
+  for(let i=0;i<15;i++) spawnFood();
+  for(let i=0;i<3;i++) spawnSpider();
+  player.x=nest.x; player.y=nest.y; player.carrying=false; player.attackCooldown=0;
+  gameState='playing';
+}
+
+// --- Main menu ---
+function drawMenu(){
+  ctx.fillStyle='#8B4513';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='yellow';
+  ctx.font='50px Arial'; ctx.textAlign='center';
+  ctx.fillText('Ant Colony Adventure',canvas.width/2,150);
+  ctx.font='30px Arial';
+  ctx.fillStyle='white';
+  ctx.fillText('Press ENTER to Start',canvas.width/2,300);
+  ctx.fillText('Press I for Instructions',canvas.width/2,350);
+}
+
+// --- Instructions ---
+function drawInstructions(){
+  ctx.fillStyle='#654321'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='white'; ctx.font='25px Arial'; ctx.textAlign='center';
+  ctx.fillText('Instructions:',canvas.width/2,100);
+  ctx.font='20px Arial';
+  ctx.fillText('Arrow Keys or WASD: Move Player Ant',canvas.width/2,160);
+  ctx.fillText('Spacebar: Attack Spiders',canvas.width/2,190);
+  ctx.fillText('Collect food and return to nest',canvas.width/2,220);
+  ctx.fillText('Protect the queen and colony!',canvas.width/2,250);
+  ctx.fillText('Press B to go Back',canvas.width/2,300);
+}
+
+// --- Game loop ---
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(gameState==='menu'){ drawMenu(); }
+  else if(gameState==='instructions'){ drawInstructions(); }
+  else if(gameState==='playing'){
+    // Background
+    let grd=ctx.createLinearGradient(0,0,0,canvas.height);
+    grd.addColorStop(0,'#c2b280'); grd.addColorStop(1,'#7c4a2f'); ctx.fillStyle=grd; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // Nest
+    ctx.fillStyle='#8B4513'; ctx.beginPath(); ctx.arc(nest.x,nest.y,nest.size,0,Math.PI*2); ctx.fill();
+
+    // Eggs
+    eggs.forEach(e=>{ e.update(); e.draw(); });
+
+    // Ants
+    ants.forEach(a=>{ a.move(); a.draw(); });
+
+    // Spiders
+    spiders.forEach(s=>{ s.move(); s.draw(); });
+
+    // Food
+    foods.forEach(f=>{ if(!f.collected) f.draw(); });
+
+    // Queen lays eggs
+    if(ants.find(a=>a.type==='queen') && colonyFood>=15){
+      if(Math.random()<0.01){ eggs.push(new Egg()); colonyFood-=15; }
+    }
+
+    // Player movement
+    if(keys['ArrowUp']||keys['w']) player.y-=player.speed;
+    if(keys['ArrowDown']||keys['s']) player.y+=player.speed;
+    if(keys['ArrowLeft']||keys['a']) player.x-=player.speed;
+    if(keys['ArrowRight']||keys['d']) player.x+=player.speed;
+
+    // Player collects food
+    foods.forEach(f=>{
+      if(!f.collected && Math.sqrt((f.x-player.x)**2+(f.y-player.y)**2)<player.size+f.size){
+        f.collected=true; player.carrying=true;
+      }
+    });
+    // Deposit food at nest
+    if(player.carrying && Math.sqrt((player.x-nest.x)**2+(player.y-nest.y)**2)<nest.size){
+      colonyFood+=10; score+=10; player.carrying=false;
+    }
+
+    // Player attack
+    if(player.attackCooldown>0) player.attackCooldown--;
+    if(keys[' ']){ // Spacebar
+      if(player.attackCooldown===0){
+        spiders.forEach(s=>{
+          if(Math.sqrt((s.x-player.x)**2 + (s.y-player.y)**2)<player.size+10){
+            spiders.splice(spiders.indexOf(s),1);
+          }
+        });
+        player.attackCooldown=30; // cooldown frames
+      }
+    }
+
+    // Draw player
+    ctx.fillStyle=player.carrying?'green':'yellow';
+    ctx.beginPath(); ctx.arc(player.x,player.y,player.size,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='black'; ctx.stroke();
+    if(player.attackCooldown>0){ ctx.strokeStyle='red'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(player.x,player.y,player.size+2,0,Math.PI*2); ctx.stroke(); ctx.lineWidth=1; }
+
+    // Stats
+    ctx.fillStyle='white'; ctx.font='20px Arial'; ctx.textAlign='left';
+    ctx.fillText(`Food Collected: ${score}`,10,30);
+    ctx.fillText(`Colony Food: ${colonyFood}`,10,55);
+    ctx.fillText(`Ants Alive: ${ants.length}`,10,80);
+    ctx.fillText(`Eggs: ${eggs.length}`,10,105);
+
+    // Check queen
+    if(!ants.find(a=>a.type==='queen')){
+      gameState='menu'; alert('Queen has died! Game Over.');
+    }
+  }
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+
+// --- Menu input ---
+document.addEventListener('keydown', e=>{
+  if(gameState==='menu'){
+    if(e.key==='Enter') initGame();
+    if(e.key==='i'||e.key==='I') gameState='instructions';
+  } else if(gameState==='instructions'){
+    if(e.key==='b'||e.key==='B') gameState='menu';
+  }
+});
+
+// Click to spawn food
+canvas.addEventListener('click',e=>{ if(gameState==='playing') foods.push(new Food(e.offsetX,e.offsetY)); });
+</script>
+</body>
+</html>
