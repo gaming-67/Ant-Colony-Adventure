@@ -155,3 +155,43 @@ function gameLoop(){
     if(keys['ArrowDown']||keys['s']) player.y+=player.speed;
     if(keys['ArrowLeft']||keys['a']) player.x-=player.speed;
     if(keys['ArrowRight']||keys['d']) player.x+=player.speed;
+
+    foods.forEach(f=>{ if(!f.collected && Math.sqrt((f.x-player.x)**2+(f.y-player.y)**2)<player.size+f.size){ f.collected=true; player.carrying=true; }});
+    if(player.carrying && Math.sqrt((player.x-baseWidth/2)**2 + (player.y-baseHeight/2)**2)<30){ colonyFood+=10; score+=10; player.carrying=false; }
+
+    if(player.attackCooldown>0) player.attackCooldown--;
+    if(keys[' ']){ if(player.attackCooldown===0){ enemies.forEach(e=>{ if(Math.sqrt((e.x-player.x)**2+(e.y-player.y)**2)<player.size+10){ e.takeDamage(player.attackPower); } }); player.attackCooldown=30; } }
+
+    ctx.fillStyle=player.carrying?'green':'yellow';
+    ctx.beginPath(); ctx.arc(player.x*scale,player.y*scale,player.size*scale,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='black'; ctx.stroke();
+    if(player.attackCooldown>0){ ctx.strokeStyle='red'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(player.x*scale,player.y*scale,(player.size+2)*scale,0,Math.PI*2); ctx.stroke(); ctx.lineWidth=1; }
+
+    // Stats
+    ctx.fillStyle='white'; ctx.font='20px Arial'; ctx.textAlign='left';
+    ctx.fillText(`Food Collected: ${score}`,10,30);
+    ctx.fillText(`Colony Food: ${colonyFood}`,10,55);
+    ctx.fillText(`Ants Alive: ${ants.length}`,10,80);
+    ctx.fillText(`Eggs: ${eggs.length}`,10,105);
+    ctx.fillText(`Enemies: ${enemies.length}`,10,130);
+
+    if(!ants.find(a=>a.type==='queen')){ gameState='menu'; alert('Queen has died! Game Over.'); }
+  }
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+
+// --- Menu ---
+function drawMenu(){
+  ctx.fillStyle='#8B4513'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.textAlign='center'; ctx.font='50px Arial'; ctx.fillStyle='yellow'; ctx.fillText('Ant Colony Adventure',canvas.width/2,150);
+  ctx.font='30px Arial'; ctx.fillStyle='white'; ctx.fillText('Press ENTER to Start',canvas.width/2,300);
+}
+
+document.addEventListener('keydown',e=>{
+  if(gameState==='menu' && e.key==='Enter') initGame();
+});
+canvas.addEventListener('click', e=>{ if(gameState==='playing') foods.push(new Food(e.offsetX/scale,e.offsetY/scale)); });
+</script>
+</body>
+</html>
