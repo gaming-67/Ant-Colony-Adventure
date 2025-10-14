@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ant Colony Adventure</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #a3d9a5; }
+  canvas { display: block; margin: 0 auto; background: #f2e6c8; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const ants = [];
+const foods = [];
+let score = 0;
+
+// Ant class
+class Ant {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.size = 10;
+    this.speed = 1.5;
+  }
+  move() {
+    let target = foods[Math.floor(Math.random() * foods.length)];
+    if (target) {
+      const dx = target.x - this.x;
+      const dy = target.y - this.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      this.x += (dx/dist) * this.speed;
+      this.y += (dy/dist) * this.speed;
+
+      if(dist < 5) {
+        foods.splice(foods.indexOf(target), 1);
+        score++;
+      }
+    }
+  }
+  draw() {
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+// Food class
+class Food {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.size = 5;
+  }
+  draw() {
+    ctx.fillStyle = 'red';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+// Spawn initial ants and food
+for(let i=0; i<5; i++) ants.push(new Ant(Math.random()*canvas.width, Math.random()*canvas.height));
+for(let i=0; i<10; i++) foods.push(new Food(Math.random()*canvas.width, Math.random()*canvas.height));
+
+function gameLoop() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  
+  // Update and draw ants
+  ants.forEach(a => { a.move(); a.draw(); });
+  // Draw food
+  foods.forEach(f => f.draw());
+  
+  // Display score
+  ctx.fillStyle = 'black';
+  ctx.font = '20px Arial';
+  ctx.fillText('Food Collected: ' + score, 10, 30);
+
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+
+// Add food on click
+canvas.addEventListener('click', e => {
+  foods.push(new Food(e.offsetX, e.offsetY));
+});
+</script>
+</body>
+</html>
