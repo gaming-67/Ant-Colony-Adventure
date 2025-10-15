@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Ant Colony — Full Expansion (Queen Feeding & More)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{
+    --bg-top:#efe1b8; --bg-bottom:#7b4b2b;
+    --panel: rgba(10,10,12,0.58);
+    --accent: #ffd54f;
+    --muted: #dcdcdc;
+  }
+  html,body{height:100%;margin:0;background:#111;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;color:#eee}
+  canvas{display:block; width:100vw; height:100vh; background: linear-gradient(180deg,var(--bg-top),var(--bg-bottom));}
+  /* UI */
+  #ui { position:absolute; left:12px; top:12px; z-index:40; width:360px; display:flex; flex-direction:column; gap:10px;}
+  .panel { background:var(--panel); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.04); box-shadow:0 10px 30px rgba(0,0,0,0.45); }
+  #buttons { position:absolute; right:12px; top:12px; z-index:40; display:flex; flex-direction:column; gap:8px; }
+  .btn { background:#222; color:#fff; border:1px solid rgba(255,255,255,0.06); padding:8px 12px; border-radius:10px; font-weight:700; cursor:pointer; }
+  .small { font-size:13px; color:var(--muted); }
+  #buildPanel { position:absolute; right:12px; top:120px; width:320px; z-index:41; display:none; }
+  #gameOver { position:fixed; inset:0; display:none; background:rgba(0,0,0,0.7); align-items:center; justify-content:center; z-index:100; }
+  #gameOverCard { background:#111; padding:20px; border-radius:12px; width:480px; max-width:92%; text-align:center; }
+  #message { position:absolute; left:50%; transform:translateX(-50%); top:20px; z-index:50; padding:10px 16px; background:rgba(0,0,0,0.6); border-radius:10px; display:none; font-weight:700;}
+  footer { position:absolute; bottom:8px; left:50%; transform:translateX(-50%); font-size:12px; color:#ddd; z-index:20; }
+  @media (max-width:900px){ #ui{width:240px} #buildPanel{width:260px} }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="ui">
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-weight:900;color:var(--accent)">🐜 Ant Colony — Expansion</div>
+      <div style="text-align:right">
+        <div id="score" style="font-weight:800;color:var(--accent)">Score: 0</div>
+        <div id="colFood" class="small">Colony Food: 0</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:10px">
+      <div>
+        <div id="activeType" style="font-weight:800">Active: —</div>
+        <div id="hpLine" class="small">HP: — / —</div>
+      </div>
+      <div style="text-align:right">
+        <div class="small" id="antsCount">Ants: 0</div>
+        <div class="small" id="enemiesCount">Enemies: 0</div>
+      </div>
+    </div>
+    <div style="margin-top:8px" class="small">Controls: WASD / Arrows Move • Space Attack • Shift Dash • E Pulse • F Feed Queen • B Build • 1–6 Switch</div>
+  </div>
+
+  <div class="panel" id="queenPanel">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div class="small">Queen</div>
+        <div id="qHealth" style="font-weight:800">HP: —</div>
+      </div>
+      <div style="width:180px">
+        <div class="small">Hunger</div>
+        <div style="background:rgba(0,0,0,0.25); height:14px; border-radius:8px; overflow:hidden;">
+          <div id="qHungerBar" style="height:100%; width:100%; background:linear-gradient(90deg,#ff7b7b,#ffd54f)"></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">Feed queen (F) when near or deposit food at her.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="buttons">
+  <button class="btn" id="startBtn">Start</button>
+  <button class="btn" id="buildBtn">Build (B)</button>
+  <button class="btn" id="restartBtn">Restart</button>
+</div>
+
+<div id="buildPanel" class="panel">
+  <h3 style="margin:6px 0">Build Menu</h3>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between">
+      <div>
+        <div style="font-weight:700">Food Storage</div>
+        <div class="small">Increases food capacity</div>
+      </div>
+      <div><button data-build="storage">Cost 80</button></div>
+    </div>
+    <div style="display:flex;justify-content:space-between">
+      <div>
+        <div style="font-weight:700">Nursery</div>
+        <div class="small">Hatch speed +</div>
+      </div>
+      <div><button data-build="nursery">Cost 120</button></div>
+    </div>
+    <div style="display:flex;justify-content:space-between">
+      <div>
+        <div style="font-weight:700">Barracks</div>
+        <div class="small">Stronger soldiers</div>
+      </div>
+      <div><button data-build="barracks">Cost 100</button></div>
+    </div>
+    <div style="margin-top:8px"><button id="closeBuild">Close</button></div>
+  </div>
+</div>
+
+<div id="message"></div>
+<footer>Ant Colony — Expand, feed the queen, survive waves!</footer>
+
+<!-- Game Over -->
+<div id="gameOver">
+  <div id="gameOverCard">
+    <h2 id="goTitle">Game Over</h2>
+    <p id="goMsg">Your queen has died — the colony collapses.</p>
+    <div style="display:flex;justify-content:center;gap:20px;margin-top:12px">
+      <div><div class="small">Score</div><div id="goScore" style="font-weight:800;font-size:20px">0</div></div>
+      <div><div class="small">Waves</div><div id="goWaves" style="font-weight:800;font-size:20px">0</div></div>
+      <div><div class="small">Ants</div><div id="goAnts" style="font-weight:800;font-size:20px">0</div></div>
+    </div>
+    <div style="margin-top:14px">
+      <button id="goRestart">Restart</button>
+      <button id="goMenu">Main Menu</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Ant Colony — Full Expansion
+   Features:
+   - Queen hunger / feeding (F near queen to feed; if hunger hits 0 queen dies => Game Over)
+   - Workers collect food; player can deposit food to queen using F
+   - Build menu (B) to create structures that affect gameplay
+   - Mutations, crates, golden food, exploration items, waves & enemies
+   - Player starts with 3 ants; active ant controlled by keys only (no drift)
+*/
+
+// Canvas setup
+const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+let W = innerWidth, H = innerHeight;
+function resize(){ W = innerWidth; H = innerHeight; canvas.width = W; canvas.height = H; }
+addEventListener('resize', resize);
+resize();
+
+// UI refs
+const startBtn = document.getElementById('startBtn'), restartBtn = document.getElementById('restartBtn'), buildBtn = document.getElementById('buildBtn');
+const buildPanel = document.getElementById('buildPanel'), closeBuild = document.getElementById('closeBuild');
+const scoreEl = document.getElementById('score'), colFoodEl = document.getElementById('colFood');
+const activeTypeEl = document.getElementById('activeType'), hpLineEl = document.getElementById('hpLine');
+const antsCountEl = document.getElementById('antsCount'), enemiesCountEl = document.getElementById('enemiesCount');
+const qHealthEl = document.getElementById('qHealth'), qHungerBar = document.getElementById('qHungerBar');
+const messageEl = document.getElementById('message');
+const gameOver = document.getElementById('gameOver'), goScore = document.getElementById('goScore'), goWaves = document.getElementById('goWaves'), goAnts = document.getElementById('goAnts');
+
+// Game state
+let gameState = 'menu'; // menu, playing, gameover
+let ants = [], enemies = [], foods = [], eggs = [], floats = [], crates = [], structures = [];
+let controllable = [], player = null, playerIndex = 0;
+let colonyFood = 0, score = 0, timer = 0;
+let wave = 0, waveTimer = 0, waveInterval = 1600;
+let queen = null;
+let upgrades = { nursery:0, storage:0, barracks:0 };
+let lastDash = 0, lastPulse = 0, lastFeed = 0;
+
+// Input
+const keys = {};
+function setKey(k, v){ if(k.length===1) k = k.toLowerCase(); keys[k] = v; }
+addEventListener('keydown', e => {
+  setKey(e.key, true);
+  if(gameState==='playing' && ['1','2','3','4','5','6'].includes(e.key)){
+    const idx = parseInt(e.key) - 1;
+    if(controllable[idx]) { playerIndex = idx; player = controllable[idx]; showMsg('Switched to ' + player.type); }
+  }
+  if(e.key === 'b' || e.key === 'B') toggleBuild();
+  if(e.key === 'f' || e.key === 'F') attemptFeed();
+});
+addEventListener('keyup', e => setKey(e.key, false));
+
+// helpers
+function rand(a,b){ return Math.random()*(b-a)+a; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function showMsg(txt, ms=1200){ messageEl.textContent = txt; messageEl.style.display = 'block'; setTimeout(()=> messageEl.style.display='none', ms); }
+function spawnFloat(x,y,txt,color='#fff'){ floats.push({x,y,txt,color,t:0}); }
+
+// Entities
+class Food {
+  constructor(x,y,amt=8,golden=false){ this.x=x; this.y=y; this.size = golden?10:6; this.amount = amt; this.collected = false; this.golden = !!golden; }
+  draw(){ const bob = Math.sin(Date.now()/180 + this.x)*2; ctx.fillStyle = this.golden ? '#ffdf6b' : '#e84e4e'; ctx.beginPath(); ctx.ellipse(this.x, this.y + bob, this.size, this.size*0.75, 0,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.stroke(); }
+}
+
+class Crate { constructor(x,y){ this.x=x; this.y=y; this.size=12; this.t=0; } update(){ this.t++; } draw(){ ctx.fillStyle='#ffd54f'; ctx.beginPath(); ctx.rect(this.x-this.size, this.y-this.size, this.size*2, this.size*2); ctx.fill(); ctx.strokeStyle='black'; ctx.stroke(); } }
+
+class Egg {
+  constructor(x,y){ this.x=x; this.y=y; this.t=0; this.hatch = Math.max(180, 500 - upgrades.nursery*50); }
+  update(){ this.t++; if(this.t >= this.hatch){ this.hatchNow(); } }
+  hatchNow(){
+    const types = ['worker','soldier','scout','harvester','medic','defender','builder','fire','guardian'];
+    const type = types[Math.floor(Math.random()*types.length)];
+    const a = new Ant(this.x+rand(-18,18), this.y+rand(-18,18), type);
+    if(Math.random() < 0.18){ a.mutated = true; a.speed *= 1.25; a.maxHealth = Math.ceil(a.maxHealth*1.4); a.health = a.maxHealth; a.color = '#ffd54f'; }
+    ants.push(a);
+    if(['worker','soldier','scout','harvester','medic','defender','builder','fire','guardian'].includes(type)) controllable.push(a);
+    eggs.splice(eggs.indexOf(this),1);
+    spawnFloat(a.x,a.y-8,'HATCH','#fff');
+  }
+  draw(){ const grow = clamp(this.t/this.hatch,0,1); ctx.fillStyle='orange'; ctx.beginPath(); ctx.ellipse(this.x,this.y,5*grow+1,7*grow+1,0,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.stroke(); }
+}
+
+class Ant {
+  constructor(x,y,type='worker'){
+    this.x=x; this.y=y; this.type=type; this.size=(type==='queen'?18:10); this.color=this.baseColor(); this.mutated=false;
+    this.speed = (type==='scout'?2.6: type==='soldier'?1.7:1.45) + (upgrades.barracks?0.2:0);
+    this.maxHealth = (type==='soldier'?6: type==='defender'?8: type==='guardian'?11: type==='fire'?3:3);
+    this.health = this.maxHealth;
+    this.carry = (type==='harvester'?2:1);
+    this.target = null;
+    this.attack = (type==='soldier'?1: type==='fire'?2:1);
+    this.builderCooldown = 0;
+    this.holding = 0; // if ant is carrying food (not necessary for all, but workers can)
+  }
+  baseColor(){
+    switch(this.type){
+      case 'queen': return '#7a2e7a';
+      case 'soldier': return '#1e90ff';
+      case 'scout': return '#ffa500';
+      case 'harvester': return '#2e8b57';
+      case 'defender': return '#8b0000';
+      case 'medic': return '#00d676';
+      case 'builder': return '#6e6e6e';
+      case 'fire': return '#ff4500';
+      case 'guardian': return '#4b0082';
+      default: return '#8b4513';
+    }
+  }
+  update(){
+    // if this is the active player, skip AI (player controlled)
+    if(this === player) return;
+
+    // following behavior for controllables: follow active player
+    if(controllable.includes(this) && player){
+      const dxp = player.x - this.x, dyp = player.y - this.y;
+      const dp = Math.hypot(dxp,dyp);
+      if(dp > 46){ // follow distance
+        this.moveTo(player.x + rand(-18,18), player.y + rand(-18,18));
+        return;
+      }
+    }
+
+    if(this.type === 'queen'){
+      // queen does not move
+      return;
+    }
+
+    // builder: rare building action (flavor)
+    if(this.type === 'builder'){
+      if(this.builderCooldown > 0) this.builderCooldown--;
+      else if(Math.random() < 0.002){ this.builderCooldown = 1000; spawnFloat(this.x,this.y-8,'BUILT','#ddd'); }
+      if(!this.target || this.target.collected) this.target = foods.length ? foods[Math.floor(Math.random()*foods.length)] : null;
+      if(this.target) this.moveTo(this.target.x, this.target.y);
+    }
+
+    // worker/harvester gather food and bring to queen
+    if(this.type === 'worker' || this.type === 'harvester' || this.type === 'builder'){
+      if(this.holding > 0){
+        // go to queen to deposit
+        this.moveTo(queen.x, queen.y);
+        if(Math.hypot(this.x-queen.x, this.y-queen.y) < 18){
+          // deposit to colony food
+          colonyFood += this.holding;
+          spawnFloat(queen.x, queen.y-10, '+QF ' + this.holding, '#ffd54f');
+          this.holding = 0;
+        }
+        return;
+      }
+      if(!this.target || this.target.collected) this.target = foods.length ? foods[Math.floor(Math.random()*foods.length)] : null;
+      if(this.target){
+        this.moveTo(this.target.x, this.target.y);
+        if(Math.hypot(this.x-this.target.x, this.y-this.target.y) < 10){
+          if(!this.target.collected){
+            this.target.collected = true;
+            this.holding = this.carry * this.target.amount;
+            spawnFloat(this.x, this.y-8, 'Picked', '#ffd54f');
+            this.target = null;
+          }
+        }
+      }
+    }
+
+    // soldiers defend
+    if(this.type === 'soldier' || this.type === 'defender' || this.type === 'guardian' || this.type === 'fire'){
+      const nearest = getClosestEnemy(this);
+      if(nearest){
+        this.moveTo(nearest.x, nearest.y);
+        if(Math.hypot(this.x-nearest.x, this.y-nearest.y) < this.size + nearest.size + 4){
+          nearest.takeDamage(this.attack + (this.mutated?1:0) + (upgrades.barracks?0.5:0));
+          spawnFloat(nearest.x, nearest.y-8, 'DMG', '#ff8a8a');
+        }
+      }
+    }
+
+    if(this.type === 'scout'){
+      if(!this.target || Math.random() < 0.01) this.target = {x: rand(40,W-40), y: rand(40,H-40)};
+      if(this.target) this.moveTo(this.target.x, this.target.y);
+    }
+
+    if(this.type === 'medic'){
+      for(const a of ants){
+        if(a !== this && Math.hypot(a.x-this.x, a.y-this.y) < 38 && a.health < a.maxHealth){
+          a.health = Math.min(a.maxHealth, a.health + 0.02);
+        }
+      }
+    }
+
+    // clamp to map
+    this.x = clamp(this.x, 8, W-8);
+    this.y = clamp(this.y, 8, H-8);
+  }
+  moveTo(tx,ty){
+    const dx = tx - this.x, dy = ty - this.y;
+    const d = Math.hypot(dx,dy);
+    if(d>0.5){ this.x += (dx/d) * this.speed; this.y += (dy/d) * this.speed; }
+  }
+  takeDamage(d){
+    this.health -= d;
+    spawnFloat(this.x,this.y-8, '-' + Math.round(d), '#ffa07a');
+    if(this.health <= 0){
+      const idx = ants.indexOf(this); if(idx>=0) ants.splice(idx,1);
+      const ci = controllable.indexOf(this); if(ci>=0) controllable.splice(ci,1);
+      if(this.type === 'queen'){
+        // Queen died -> game over
+        endGame('The Queen has died — the colony collapses.');
+        return;
+      }
+      if(player === this){
+        if(controllable.length){ playerIndex = 0; player = controllable[0]; showMsg('Active ant died — switched'); }
+        else { player = null; showMsg('Active ant died'); }
+      }
+    }
+  }
+  draw(){
+    ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.16)'; ctx.stroke();
+    ctx.fillStyle='rgba(0,0,0,0.12)'; ctx.beginPath(); ctx.arc(this.x, this.y, this.size*0.36,0,Math.PI*2); ctx.fill();
+    // health bar
+    const bw = this.size*2;
+    ctx.fillStyle='red'; ctx.fillRect(this.x - this.size, this.y - this.size - 8, bw * (this.health/this.maxHealth), 4);
+    ctx.strokeStyle='black'; ctx.strokeRect(this.x - this.size, this.y - this.size - 8, bw, 4);
+    if(this.mutated){ ctx.strokeStyle='#ffd70088'; ctx.beginPath(); ctx.arc(this.x,this.y,this.size+4,0,Math.PI*2); ctx.stroke(); }
+  }
+}
+
+class Enemy {
+  constructor(x,y,type='spider'){
+    this.x=x; this.y=y; this.type=type;
+    this.size = (type==='beetle'?14: type==='antlion'?22:10);
+    this.color = (type==='beetle'?'#6b3e2b': type==='wasp'?'#e1c542': type==='antlion'?'#7a3a25':'#7b2626');
+    this.maxHealth = (type==='beetle'?6: type==='wasp'?2: type==='antlion'?18:3);
+    this.health = this.maxHealth;
+    this.speed = (type==='beetle'?0.6: type==='wasp'?2.2: type==='antlion'?0.45:1.0);
+    this.mutated = false;
+  }
+  update(){
+    if(ants.length === 0) return;
+    const target = ants.find(a=>a.type === 'queen') || ants[Math.floor(Math.random()*ants.length)];
+    const dx = target.x - this.x, dy = target.y - this.y;
+    const d = Math.hypot(dx,dy);
+    if(d>0.5){ this.x += (dx/d) * this.speed; this.y += (dy/d) * this.speed; }
+    if(d < this.size + target.size + 2){
+      const dmg = (this.type === 'antlion') ? 0.5 : (this.type === 'wasp' ? 0.6 : 0.12);
+      target.takeDamage(dmg);
+    }
+  }
+  takeDamage(d){
+    this.health -= d;
+    spawnFloat(this.x,this.y-8, '-' + Math.round(d), '#ff8a8a');
+    if(this.health <= 0){
+      if(Math.random() < 0.5) foods.push(new Food(this.x + rand(-12,12), this.y + rand(-12,12), 8));
+      const i = enemies.indexOf(this); if(i>=0) enemies.splice(i,1);
+      score += 5;
+    }
+  }
+  draw(){
+    const bob = Math.sin(Date.now()/180 + this.x)*2;
+    ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y + bob, this.size, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle='black'; ctx.stroke();
+    ctx.fillStyle='red'; ctx.fillRect(this.x - this.size, this.y - this.size - 6, this.size*2 * (this.health/this.maxHealth), 4);
+    ctx.strokeStyle='black'; ctx.strokeRect(this.x - this.size, this.y - this.size - 6, this.size*2, 4);
+  }
+}
+
+// build / structures
+function buildStructure(name){
+  if(name === 'storage'){
+    if(colonyFood < 80){ showMsg('Not enough food'); return; }
+    colonyFood -= 80; upgrades.storage = (upgrades.storage || 0) + 1;
+    structures.push({type:'storage', x: rand(80, W-80), y: rand(80,H-80)});
+    showMsg('Built Food Storage');
+  } else if(name === 'nursery'){
+    if(colonyFood < 120){ showMsg('Not enough food'); return; }
+    colonyFood -= 120; upgrades.nursery = (upgrades.nursery || 0) + 1;
+    structures.push({type:'nursery', x: rand(80, W-80), y: rand(80,H-80)});
+    showMsg('Built Nursery');
+  } else if(name === 'barracks'){
+    if(colonyFood < 100){ showMsg('Not enough food'); return; }
+    colonyFood -= 100; upgrades.barracks = (upgrades.barracks || 0) + 1;
+    structures.push({type:'barracks', x: rand(80, W-80), y: rand(80,H-80)});
+    showMsg('Built Barracks');
+  }
+}
+
+// helpers
+function getClosestEnemy(from){
+  if(enemies.length === 0) return null;
+  let best = enemies[0], bd = Math.hypot(enemies[0].x - from.x, enemies[0].y - from.y);
+  for(const e of enemies){ const d = Math.hypot(e.x-from.x, e.y-from.y); if(d < bd){ bd = d; best = e; } }
+  return best;
+}
+
+// abilities
+function doDash(){
+  const now = performance.now(); if(now - lastDash < 700) return; lastDash = now;
+  if(!player) return;
+  let dx=0, dy=0;
+  if(keys['w']||keys['arrowup']) dy -= 1;
+  if(keys['s']||keys['arrowdown']) dy += 1;
+  if(keys['a']||keys['arrowleft']) dx -= 1;
+  if(keys['d']||keys['arrowright']) dx += 1;
+  if(dx === 0 && dy === 0){ dx = 1; }
+  const mag = Math.hypot(dx,dy);
+  player.x += (dx/mag) * 100; player.y += (dy/mag) * 100;
+  for(const e of enemies.slice()){ if(Math.hypot(e.x-player.x, e.y-player.y) < player.size + e.size + 12) e.takeDamage(2 + (upgrades.barracks?0.5:0)); }
+  showMsg('Dash!');
+}
+function doPulse(){
+  const now = performance.now(); if(now - lastPulse < 2000) return; lastPulse = now;
+  if(!player) return;
+  const r = 110;
+  for(const e of enemies.slice()){ if(Math.hypot(e.x-player.x, e.y-player.y) <= r) e.takeDamage(2 + (upgrades.barracks?0.5:0)); }
+  for(let i=0;i<10;i++) spawnFloat(player.x + rand(-r,r), player.y + rand(-r,r), 'P', '#ffd54f');
+  showMsg('Pulse!');
+}
+
+// feeding queen
+function attemptFeed(){
+  if(gameState !== 'playing') return;
+  const now = performance.now();
+  if(now - lastFeed < 250) return;
+  lastFeed = now;
+  if(!player) return;
+  const d = Math.hypot(player.x - queen.x, player.y - queen.y);
+  if(d <= 40 && colonyFood > 0){
+    // feed from colonyFood
+    const give = Math.min(20, colonyFood);
+    colonyFood -= give;
+    queen.hunger = Math.min(queen.maxHunger, queen.hunger + give);
+    spawnFloat(queen.x, queen.y-10, 'Fed +' + give, '#ffd54f');
+    showMsg('Fed the Queen');
+    return;
+  }
+  // if player is holding food (workers automatically deposit) — not implemented per-player holding; inform
+  showMsg('You must be near the queen and colony needs food.');
+}
+
+// spawn helpers
+function spawnEnemyRandom(){
+  const r = Math.random();
+  let t = 'spider';
+  if(r < 0.5) t = 'spider';
+  else if(r < 0.78) t = 'beetle';
+  else if(r < 0.95) t = 'wasp';
+  else if(r < 0.995) t = 'hornet';
+  else t = 'antlion';
+  const e = new Enemy(rand(60, W-60), rand(60, H-60), t);
+  if(Math.random() < 0.12){ e.mutated = true; e.maxHealth *= 1.4; e.health = e.maxHealth; e.speed *= 1.12; }
+  enemies.push(e);
+}
+function spawnFoodRandom(){
+  if(Math.random() < 0.06) foods.push(new Food(rand(40,W-40), rand(40,H-40), 60, true));
+  else foods.push(new Food(rand(40,W-40), rand(40,H-40), 8));
+}
+function spawnCrateRandom(){ if(Math.random() < 0.02) crates.push(new Crate(rand(60,W-60), rand(60,H-60))); }
+
+// start/reset/end
+function startGame(){
+  ants = []; enemies = []; foods = []; eggs = []; floats = []; crates = []; structures = []; controllable = [];
+  colonyFood = 140; score = 0; timer = 0; wave = 0; waveTimer = 0;
+  upgrades = { nursery:0, storage:0, barracks:0 };
+  // queen object with hunger
+  queen = new Ant(W/2, H/2, 'queen');
+  queen.maxHunger = 300; queen.hunger = queen.maxHunger; queen.hungerDecay = 0.02; queen.layCooldown = 0;
+  ants.push(queen);
+  // starters: worker, soldier, builder
+  const s1 = new Ant(W/2+70, H/2, 'worker'), s2 = new Ant(W/2+40, H/2+40, 'soldier'), s3 = new Ant(W/2-60, H/2+10, 'builder');
+  ants.push(s1, s2, s3);
+  controllable.push(s1, s2, s3);
+  playerIndex = 0; player = controllable[playerIndex];
+  // initial resources & enemies
+  for(let i=0;i<10;i++) foods.push(new Food(rand(80,W-80), rand(80,H-80)));
+  for(let i=0;i<4;i++) spawnEnemyRandom();
+  gameState = 'playing';
+  hideGameOver();
+  showMsg('Game started — feed the Queen to hatch eggs (F)!');
+}
+
+function endGame(reason){
+  gameState = 'gameover';
+  document.getElementById('goMsg').textContent = reason || 'The Queen has died — the colony collapses.';
+  goScore.textContent = Math.round(score);
+  goWaves.textContent = wave;
+  goAnts.textContent = ants.length;
+  gameOver.style.display = 'flex';
+}
+
+function hideGameOver(){ gameOver.style.display = 'none'; }
+document.getElementById('goRestart').addEventListener('click', ()=> startGame());
+document.getElementById('goMenu').addEventListener('click', ()=> startGame());
+
+// canvas click: pick crates or spawn food
+canvas.addEventListener('click', e=>{
+  if(gameState !== 'playing') return;
+  const rect = canvas.getBoundingClientRect(); const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  // pick up crate if near clicked pos
+  for(let i=crates.length-1;i>=0;i--){
+    const c = crates[i];
+    if(Math.hypot(c.x-x, c.y-y) < 30){
+      const eff = Math.random();
+      if(eff < 0.33){ if(player){ player.speed *= 1.4; setTimeout(()=>{ if(player) player.speed /= 1.4; }, 8000); showMsg('Speed boost!'); } }
+      else if(eff < 0.66){ if(player){ player.health = Math.min(player.maxHealth, player.health + 6); showMsg('Healed!'); } }
+      else { colonyFood += 40; showMsg('Golden food +40'); }
+      crates.splice(i,1);
+      return;
+    }
+  }
+  // otherwise spawn food (player can place)
+  foods.push(new Food(x,y,8));
+});
+
+// build UI
+buildBtn.addEventListener('click', toggleBuild);
+function toggleBuild(){ buildPanel.style.display = buildPanel.style.display === 'none' ? 'block' : 'none'; }
+closeBuild.addEventListener('click', ()=> buildPanel.style.display = 'none');
+buildPanel.querySelectorAll('button[data-build]').forEach(btn=>{
+  btn.addEventListener('click', e => buildStructure(e.target.dataset.build));
+});
+
+// main loop
+let last = performance.now();
+let spawnAcc = 0, waveAcc = 0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = (now - last) / 16.666; last = now;
+  if(gameState === 'menu'){
+    ctx.clearRect(0,0,W,H);
+    const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#efe1b8'); g.addColorStop(1,'#7b4b2b');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    // preview
+    for(const f of foods) f.draw();
+    for(const a of ants) a.draw();
+    for(const e of enemies) e.draw();
+    return;
+  }
+  if(gameState === 'gameover'){
+    // allow rendering but not update
+    ctx.clearRect(0,0,W,H);
+    const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#2b1f12'); g.addColorStop(1,'#4a2b15');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    for(const f of foods) f.draw();
+    for(const a of ants) a.draw();
+    for(const e of enemies) e.draw();
+    for(const s of structures){ ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(s.x-18, s.y-10, 36, 20); }
+    return;
+  }
+
+  // playing state
+  timer++; spawnAcc++; waveAcc++;
+
+  // spawn small things
+  if(spawnAcc % 90 === 0) spawnFoodRandom();
+  if(spawnAcc % 160 === 0) spawnEnemyRandom();
+  if(spawnAcc % 900 === 0) spawnCrateRandom();
+
+  // waves
+  if(waveAcc >= waveInterval){
+    waveAcc = 0; wave++;
+    const count = 3 + Math.floor(wave * 1.2);
+    for(let i=0;i<count;i++) spawnEnemyRandom();
+    if(wave % 4 === 0){ const b = new Enemy(rand(120,W-120), rand(120,H-120), 'antlion'); b.maxHealth *= 1.5; b.health = b.maxHealth; enemies.push(b); showMsg('Boss wave!'); }
+    else showMsg('Wave ' + wave);
+  }
+
+  // update queen hunger: decays over time, if low -> she stops producing eggs, if at 0 start death countdown
+  queen.hunger -= queen.hungerDecay;
+  if(queen.hunger < 0) queen.hunger = 0;
+  // if hunger 0, queen slowly loses health
+  if(queen.hunger <= 0){
+    queen.health -= 0.02;
+    if(queen.health <= 0) { endGame('The Queen starved to death.'); return; }
+  } else {
+    // queen lays eggs when hunger above threshold and cooldown passes and colony has > 10 food
+    queen.layCooldown++;
+    const layThreshold = queen.maxHunger * 0.25;
+    if(queen.hunger > layThreshold && queen.layCooldown > 800 && colonyFood >= 10){
+      queen.layCooldown = 0;
+      // consume some colony food when laying
+      colonyFood = Math.max(0, colonyFood - 10);
+      eggs.push(new Egg(queen.x + rand(-18,18), queen.y + rand(-18,18)));
+      spawnFloat(queen.x, queen.y-12, 'EGG', '#fff');
+    }
+  }
+
+  // update entities
+  for(const s of structures){} // flavor; could give bonuses applied via upgrades variable
+  for(const c of crates) c.update();
+  for(const e of enemies) e.update();
+  for(const eg of eggs) eg.update();
+  for(const a of ants) a.update();
+
+  // ants: deposit from holding to queen automatically done in ant.update (workers)
+  // floating text lifecycle
+  for(let i=floats.length-1;i>=0;i--){ floats[i].t++; if(floats[i].t>80) floats.splice(i,1); }
+
+  // player movement only when keys pressed (no drift)
+  if(player){
+    let dx=0, dy=0;
+    if(keys['w'] || keys['arrowup']) dy -= 1;
+    if(keys['s'] || keys['arrowdown']) dy += 1;
+    if(keys['a'] || keys['arrowleft']) dx -= 1;
+    if(keys['d'] || keys['arrowright']) dx += 1;
+    if(dx !== 0 || dy !== 0){
+      const m = Math.hypot(dx,dy);
+      player.x += (dx/m) * player.speed;
+      player.y += (dy/m) * player.speed;
+    }
+  }
+
+  // handle crates auto-pick when player near (or workers deposit automatically)
+  for(let i=crates.length-1;i>=0;i--){
+    const c = crates[i];
+    if(player && Math.hypot(player.x - c.x, player.y - c.y) < 28){
+      const eff = Math.random();
+      if(eff < 0.33){ player.speed *= 1.4; setTimeout(()=>{ if(player) player.speed /= 1.4; }, 8000); showMsg('Speed boost!'); }
+      else if(eff < 0.66){ if(player) { player.health = Math.min(player.maxHealth, player.health + 8); showMsg('Healed!'); } }
+      else { colonyFood += 50; showMsg('Golden food +50'); }
+      crates.splice(i,1);
+    }
+  }
+
+  // render world
+  ctx.clearRect(0,0,W,H);
+  const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#efe1b8'); g.addColorStop(1,'#7b4b2b'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+  // draw structures
+  for(const s of structures){
+    if(s.type === 'storage'){ ctx.fillStyle='#8b5a2b'; ctx.fillRect(s.x-18, s.y-10, 36, 20); ctx.strokeStyle='black'; ctx.strokeRect(s.x-18, s.y-10, 36, 20); }
+    if(s.type === 'nursery'){ ctx.fillStyle='#905e9d'; ctx.fillRect(s.x-16, s.y-12, 32, 24); ctx.strokeStyle='black'; ctx.strokeRect(s.x-16, s.y-12, 32, 24); }
+    if(s.type === 'barracks'){ ctx.fillStyle='#444444'; ctx.fillRect(s.x-18, s.y-10, 36, 20); ctx.strokeStyle='black'; ctx.strokeRect(s.x-18, s.y-10, 36, 20); }
+  }
+
+  // draw foods, crates, eggs, ants, enemies
+  for(const f of foods) if(!f.collected) f.draw();
+  for(const c of crates) c.draw();
+  for(const eg of eggs) eg.draw();
+  for(const a of ants) a.draw();
+  for(const e of enemies) e.draw();
+
+  // draw floats
+  for(const d of floats){ ctx.font='14px sans-serif'; ctx.fillStyle = d.color; ctx.fillText(d.txt, d.x, d.y - (d.t*0.6)); }
+
+  // UI updates
+  scoreEl.textContent = 'Score: ' + Math.round(score);
+  colFoodEl.textContent = 'Colony Food: ' + Math.round(colonyFood);
+  activeTypeEl.textContent = 'Active: ' + (player ? player.type.toUpperCase() : '—');
+  hpLineEl.textContent = player ? `HP: ${Math.round(player.health)}/${player.maxHealth}` : 'HP: —';
+  antsCountEl.textContent = (`Ants: ${ants.length}`);
+  enemiesCountEl.textContent = (`Enemies: ${enemies.length}`);
+  qHealthEl.textContent = `HP: ${Math.round(queen.health)}/${queen.maxHealth}`;
+  // hunger bar
+  const hungerPct = clamp(queen.hunger / queen.maxHunger, 0, 1);
+  qHungerBar.style.width = (hungerPct * 100) + '%';
+
+}
+
+// attack & abilities
+addEventListener('keydown', e=>{
+  if(gameState !== 'playing') return;
+  if(e.key === ' ' && player){
+    const power = 1 + (upgrades.barracks?0.5:0);
+    for(const en of enemies.slice()){ if(Math.hypot(en.x - player.x, en.y - player.y) < player.size + en.size + 12) en.takeDamage(power); }
+  }
+  if(e.key === 'Shift') doDash();
+  if(e.key === 'e' || e.key === 'E') doPulse();
+});
+
+// Start/Restart handlers
+startBtn.addEventListener('click', ()=> startGame());
+restartBtn.addEventListener('click', ()=> startGame());
+
+// preview initial scene
+(function preview(){
+  ants = []; foods = []; enemies = []; eggs = []; floats = []; crates = [];
+  queen = new Ant(W/2, H/2, 'queen'); queen.maxHunger = 300; queen.hunger = queen.maxHunger; queen.layCooldown = 0; ants.push(queen);
+  const a1 = new Ant(W/2+60,H/2,'worker'), a2 = new Ant(W/2+40,H/2+40,'soldier'), a3 = new Ant(W/2-60,H/2+10,'builder'); ants.push(a1,a2,a3); controllable.push(a1,a2,a3); player = a1;
+  for(let i=0;i<6;i++) foods.push(new Food(rand(80,W-80), rand(80,H-80)));
+  enemies.push(new Enemy(rand(120,W-120), rand(120,H-120), 'spider'));
+})();
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
