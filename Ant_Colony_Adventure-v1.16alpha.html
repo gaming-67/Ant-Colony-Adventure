@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ant Colony Evolution</title>
+<style>
+body { margin:0; overflow:hidden; background:#1e1e1e; font-family:'Segoe UI',sans-serif; }
+canvas { display:block; background:#4a2b15; margin:0 auto; border:2px solid #222; }
+#ui {
+  position:absolute; top:10px; left:10px; color:white; z-index:5;
+  background:rgba(0,0,0,0.4); padding:10px; border-radius:8px; font-size:14px; width:200px;
+}
+#ui h3 { margin:0 0 6px 0; font-size:16px; text-align:center; }
+.stat { margin:4px 0; }
+
+button {
+  background:#643014; border:none; color:white; padding:8px 12px;
+  border-radius:6px; cursor:pointer; font-weight:bold; transition:0.2s;
+}
+button:hover { background:#8b4b1d; }
+
+#menu, #updatesPanel, #instructions {
+  position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85);
+  display:flex; flex-direction:column; justify-content:center; align-items:center; color:white; z-index:10;
+}
+#menu h1 { font-size:48px; margin-bottom:20px; color:#ffcc66; text-shadow:0 0 10px #000; }
+#menu button { margin:8px; width:160px; font-size:18px; }
+
+#updatesPanel, #instructions { display:none; text-align:center; }
+#updatesPanel ul { list-style:none; padding:0; text-align:left; }
+#backBtn { margin-top:20px; }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+<div id="ui" style="display:none;">
+  <h3>Colony Status</h3>
+  <div id="antType" class="stat"></div>
+  <div id="colonyStats" class="stat"></div>
+  <div id="enemyStats" class="stat"></div>
+</div>
+
+<!-- Main Menu -->
+<div id="menu">
+  <h1>🐜 Ant Colony Evolution 🪶</h1>
+  <button id="startBtn">Start Game</button>
+  <button id="instructionsBtn">Instructions</button>
+  <button id="updatesBtn">Updates</button>
+  <button id="exitBtn">Exit</button>
+</div>
+
+<!-- Instructions -->
+<div id="instructions">
+  <h2>How to Play</h2>
+  <p>Move with <b>WASD</b> or arrow keys.<br>
+     Press <b>SPACE</b> to attack enemies.<br>
+     Collect food, protect your queen, and grow your colony!</p>
+  <button id="backBtn">Back</button>
+</div>
+
+<!-- Updates -->
+<div id="updatesPanel">
+  <h2>Recent Updates</h2>
+  <ul>
+    <li>🐜 Fixed player movement bug</li>
+    <li>👑 Improved Queen egg-laying logic</li>
+    <li>⚔️ Expanded combat and enemy types</li>
+    <li>🎵 Added sound and music support</li>
+    <li>💡 Better UI and smoother scaling</li>
+  </ul>
+  <button id="backBtn2">Back</button>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W=window.innerWidth,H=window.innerHeight; canvas.width=W; canvas.height=H;
+
+let gameRunning=false, ants=[], enemies=[], foods=[], eggs=[];
+let keys={}, player=null, queen=null, colonyFood=0, timer=0;
+let bgm, hitSound;
+
+window.addEventListener("resize",()=>{W=window.innerWidth;H=window.innerHeight;canvas.width=W;canvas.height=H;});
+document.addEventListener("keydown",e=>keys[e.key]=true);
+document.addEventListener("keyup",e=>keys[e.key]=false);
+
+// ---- Sounds ----
+function loadSounds(){
+  bgm=new Audio("https://cdn.pixabay.com/audio/2022/03/15/audio_8b4445f03a.mp3");
+  bgm.loop=true; bgm.volume=0.3;
+  hitSound=new Audio("https://cdn.pixabay.com/audio/2021/09/15/audio_5f08d5d4d6.mp3");
+}
+
+// ---- Classes ----
+class Ant{
+  constructor(x,y,type="worker"){
+    this.x=x; this.y=y; this.type=type;
+    this.size=type==="queen"?16:type==="guardian"?12:8;
+    this.color=type==="queen"?"purple":type==="fire"?"red":type==="guardian"?"blue":"brown";
+    this.speed=type==="queen"?0:this.type==="fire"?2.5:1.8;
+    this.maxHealth=type==="queen"?25:type==="guardian"?10:5;
+    this.health=this.maxHealth;
+    this.damage=type==="fire"?3:type==="guardian"?1.5:1;
+  }
+  move(){
+    if(this===player){
+      let dx=0,dy=0;
+      if(keys["w"]||keys["ArrowUp"]) dy-=this.speed;
+      if(keys["s"]||keys["ArrowDown"]) dy+=this.speed;
+      if(keys["a"]||keys["ArrowLeft"]) dx-=this.speed;
+      if(keys["d"]||keys["ArrowRight"]) dx+=this.speed;
+      this.x+=dx; this.y+=dy;
+    }
+  }
+  attack(){
+    for(let e of enemies){
+      let d=Math.hypot(e.x-this.x,e.y-this.y);
+      if(d<25){ e.health-=this.damage; hitSound.currentTime=0; hitSound.play(); }
+    }
+  }
+  draw(){
+    ctx.fillStyle=this.color;
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fill();
+    // Health bar
+    ctx.fillStyle="red";
+    ctx.fillRect(this.x-this.size,this.y-this.size-6,this.size*2*(this.health/this.maxHealth),3);
+    ctx.strokeStyle="#000"; ctx.strokeRect(this.x-this.size,this.y-this.size-6,this.size*2,3);
+  }
+}
+
+class Enemy{
+  constructor(x,y){
+    this.x=x; this.y=y;
+    this.size=10; this.color="green";
+    this.maxHealth=4; this.health=4; this.speed=1.2;
+  }
+  update(){
+    let target=queen||player;
+    if(!target) return;
+    let dx=target.x-this.x,dy=target.y-this.y;
+    let d=Math.hypot(dx,dy);
+    if(d>0){this.x+=dx/d*this.speed;this.y+=dy/d*this.speed;}
+    if(d<20){ target.health-=0.02; }
+  }
+  draw(){
+    ctx.fillStyle=this.color;
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle="red";
+    ctx.fillRect(this.x-this.size,this.y-this.size-6,this.size*2*(this.health/this.maxHealth),3);
+    ctx.strokeStyle="#000"; ctx.strokeRect(this.x-this.size,this.y-this.size-6,this.size*2,3);
+  }
+}
+
+class Food{
+  constructor(x,y){ this.x=x; this.y=y; this.size=5; }
+  draw(){
+    ctx.fillStyle="gold";
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+
+// ---- Init & Menu Logic ----
+function startGame(){
+  document.getElementById("menu").style.display="none";
+  document.getElementById("ui").style.display="block";
+  loadSounds(); bgm.play();
+
+  ants=[]; enemies=[]; foods=[]; eggs=[];
+  queen=new Ant(W/2,H/2,"queen");
+  player=new Ant(W/2+40,H/2,"worker");
+  ants.push(queen,player);
+  colonyFood=0; timer=0; gameRunning=true;
+}
+
+document.getElementById("startBtn").onclick=startGame;
+document.getElementById("instructionsBtn").onclick=()=>{document.getElementById("menu").style.display="none";document.getElementById("instructions").style.display="flex";};
+document.getElementById("updatesBtn").onclick=()=>{document.getElementById("menu").style.display="none";document.getElementById("updatesPanel").style.display="flex";};
+document.getElementById("backBtn").onclick=()=>{document.getElementById("instructions").style.display="none";document.getElementById("menu").style.display="flex";};
+document.getElementById("backBtn2").onclick=()=>{document.getElementById("updatesPanel").style.display="none";document.getElementById("menu").style.display="flex";};
+document.getElementById("exitBtn").onclick=()=>window.close();
+
+document.addEventListener("keydown",e=>{ if(e.key===" "&&player)player.attack(); });
+
+// ---- Game Loop ----
+function spawnFood(){ foods.push(new Food(Math.random()*W,Math.random()*H)); }
+function spawnEnemy(){ enemies.push(new Enemy(Math.random()*W,Math.random()*H)); }
+
+function updateUI(){
+  document.getElementById("antType").innerText=`Ant: ${player.type}`;
+  document.getElementById("colonyStats").innerText=`Food: ${colonyFood.toFixed(0)} | Ants: ${ants.length}`;
+  document.getElementById("enemyStats").innerText=`Enemies: ${enemies.length}`;
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  if(!gameRunning) return;
+  ctx.clearRect(0,0,W,H);
+  timer++;
+
+  if(timer%200===0) spawnFood();
+  if(timer%180===0) spawnEnemy();
+
+  for(let f of foods) f.draw();
+  for(let e of enemies){ e.update(); e.draw(); }
+  for(let a of ants){ a.move(); a.draw(); }
+
+  updateUI();
+}
+loop();
+</script>
+</body>
+</html>
