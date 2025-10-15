@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Ant Colony — Final Build (Sound + Fixes)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{
+    --bg-top:#d9b77a; --bg-bottom:#7c4a2f;
+    --panel: rgba(8,8,10,0.52);
+    --accent:#ffd54f;
+    --muted:#dcdcdc;
+  }
+  html,body{height:100%;margin:0;background:#111;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;color:#eee}
+  canvas{display:block; width:100vw; height:100vh; background: linear-gradient(180deg,var(--bg-top),var(--bg-bottom));}
+  #ui{position:absolute; left:12px; top:12px; z-index:30; width:340px; display:flex; flex-direction:column; gap:10px;}
+  .panel{background:var(--panel); padding:12px; border-radius:10px; box-shadow:0 12px 30px rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.04);}
+  #topbar{display:flex; justify-content:space-between; align-items:center;}
+  #title{font-size:18px; color:var(--accent); font-weight:700;}
+  #controls{font-size:12px;color:#ddd;margin-top:8px}
+  #buttons{position:absolute; right:12px; top:12px; z-index:30; display:flex; flex-direction:column; gap:10px;}
+  .ui-btn{background:#222; color:#fff; border:1px solid rgba(255,255,255,0.05); padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600;}
+  .ui-btn.ghost{background:transparent}
+  #panelUpdates,#panelUpgrades{position:absolute; right:12px; top:108px; z-index:31; width:360px; display:none;}
+  #message{position:absolute; left:50%; transform:translateX(-50%); top:18px; z-index:32; padding:8px 14px; background:rgba(0,0,0,0.6); border-radius:8px; display:none;}
+  footer{position:absolute; bottom:8px; left:50%; transform:translateX(-50%); font-size:12px; color:#ddd; opacity:0.9}
+  @media (max-width:900px){ #ui{width:240px} #panelUpgrades,#panelUpdates{width:260px} }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="ui">
+  <div class="panel" id="panelHeader">
+    <div id="topbar">
+      <div id="title">🐜 Ant Colony — Final</div>
+      <div style="text-align:right">
+        <div id="score" style="font-weight:700;color:var(--accent)">Score: 0</div>
+        <div id="colonyFoodUI" style="font-size:12px;color:#ddd">Colony Food: 0</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div id="activeAnt" style="font-weight:700">Active: —</div>
+        <div id="hpLine" style="font-size:12px;color:var(--muted)">HP: — / —</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:12px;color:#ddd" id="antsCount">Ants: 0</div>
+        <div style="font-size:12px;color:#ddd" id="enemiesCount">Enemies: 0</div>
+      </div>
+    </div>
+    <div id="controls" class="small">WASD / Arrows: Move • Space: Attack • Shift: Dash • E: Pulse • 1–6: Switch • Click: spawn food</div>
+  </div>
+
+  <div class="panel" id="panelStatus">
+    <div style="display:flex;gap:8px">
+      <div style="flex:1">
+        <div style="font-size:13px;color:#ddd">Eggs</div>
+        <div id="eggsCount" style="font-weight:700">0</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:13px;color:#ddd">Wave</div>
+        <div id="waveCount" style="font-weight:700">0</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:13px;color:#ddd">Next Wave</div>
+        <div id="nextWaveTimer" style="font-weight:700">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="buttons">
+  <button class="ui-btn" id="btnStart">START</button>
+  <button class="ui-btn ghost" id="btnUpdates">UPDATES</button>
+  <button class="ui-btn ghost" id="btnUpgrades">UPGRADES</button>
+</div>
+
+<div id="panelUpdates" class="panel">
+  <h3 style="margin:6px 0">Updates & Notes</h3>
+  <ul style="margin:6px 0 0 18px; color:#ddd">
+    <li>Fixed movement bug — player only moves with keys pressed.</li>
+    <li>Added Builder, Fire, Guardian ants.</li>
+    <li>Wave-based enemy spawning with occasional boss.</li>
+    <li>Sound effects & background synth music (generated in-browser).</li>
+  </ul>
+</div>
+
+<div id="panelUpgrades" class="panel">
+  <h3 style="margin:6px 0">Upgrades (cost: colony food)</h3>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between"><span>Queen Fertility</span><button data-up="queenRate">40</button></div>
+    <div style="display:flex;justify-content:space-between"><span>Worker Speed</span><button data-up="workerSpeed">25</button></div>
+    <div style="display:flex;justify-content:space-between"><span>Soldier Damage</span><button data-up="soldierAtk">30</button></div>
+    <div style="display:flex;justify-content:space-between"><span>Player Attack</span><button data-up="playerAtk">20</button></div>
+  </div>
+</div>
+
+<div id="message"></div>
+<footer>Ant Colony — Final Build • Press START to play</footer>
+
+<script>
+/* -----------------------
+   Ant Colony — Full Build
+   Includes sound (WebAudio), fixes, waves, new ant types
+   Single-file game — paste & run
+   ----------------------- */
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let W = window.innerWidth, H = window.innerHeight;
+function resize(){ W = window.innerWidth; H = window.innerHeight; canvas.width = W; canvas.height = H; }
+window.addEventListener('resize', resize);
+resize();
+
+// UI references
+const activeAntEl = document.getElementById('activeAnt');
+const hpLineEl = document.getElementById('hpLine');
+const scoreEl = document.getElementById('score');
+const colonyFoodEl = document.getElementById('colonyFoodUI');
+const antsCountEl = document.getElementById('antsCount');
+const enemiesCountEl = document.getElementById('enemiesCount');
+const eggsCountEl = document.getElementById('eggsCount');
+const waveCountEl = document.getElementById('waveCount');
+const nextWaveTimerEl = document.getElementById('nextWaveTimer');
+const panelUpdates = document.getElementById('panelUpdates');
+const panelUpgrades = document.getElementById('panelUpgrades');
+const messageEl = document.getElementById('message');
+
+document.getElementById('btnUpdates').onclick = ()=> panelUpdates.style.display = panelUpdates.style.display === 'none' ? 'block' : 'none';
+document.getElementById('btnUpgrades').onclick = ()=> panelUpgrades.style.display = panelUpgrades.style.display === 'none' ? 'block' : 'none';
+document.getElementById('btnStart').onclick = ()=> startGame();
+
+// sound: simple WebAudio synth
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+const audioCtx = new AudioCtx();
+let musicGain = audioCtx.createGain(); musicGain.gain.value = 0.08; musicGain.connect(audioCtx.destination);
+let sfxGain = audioCtx.createGain(); sfxGain.gain.value = 0.5; sfxGain.connect(audioCtx.destination);
+
+// simple background synth (looping)
+let musicOsc = audioCtx.createOscillator();
+musicOsc.type = 'sine';
+musicOsc.frequency.value = 110;
+let musicLFO = audioCtx.createOscillator(); musicLFO.frequency.value = 0.1;
+let musicLF0Gain = audioCtx.createGain(); musicLF0Gain.gain.value = 40;
+musicOsc.connect(musicGain);
+musicLFO.connect(musicLF0Gain);
+musicLF0Gain.connect(musicOsc.frequency);
+musicOsc.start();
+musicLFO.start();
+
+// SFX helper functions
+function playTone(freq, duration=0.12, type='sine', volume=0.5){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.value = volume;
+  o.connect(g); g.connect(sfxGain);
+  o.start();
+  g.gain.setValueAtTime(volume, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+  o.stop(audioCtx.currentTime + duration + 0.02);
+}
+function playCollect(){ playTone(880, 0.09, 'sawtooth', 0.25); playTone(1320, 0.06, 'sine', 0.18); }
+function playAttack(){ playTone(220,0.08,'square',0.28); }
+function playHatch(){ playTone(600,0.22,'sine',0.25); playTone(900,0.18,'triangle',0.18); }
+function playWaveStart(){ playTone(160,0.5,'sine',0.25); playTone(260,0.5,'sine',0.16); }
+
+// Game state
+let gameState = 'menu';
+let timer = 0;
+let ants = [], enemies = [], foods = [], eggs = [], dmgTexts = [], barriers = [];
+let player = null; // active controlled ant
+let playerControllable = []; // array for 1..6 selection
+let playerIndex = 0;
+let colonyFood = 0, score = 0;
+let wave = 0;
+let nextWaveIn = 1000; // frames until next wave
+let spawnAccumulator = 0;
+
+// upgrades
+let upgrades = { queenRate:0, workerSpeed:0, soldierAtk:0, playerAtk:0 };
+
+// input
+let keys = {};
+window.addEventListener('keydown', (e)=>{ keys[e.key]=true; if(e.key==='Enter' && gameState!=='playing') startGame(); });
+window.addEventListener('keyup', (e)=>{ keys[e.key]=false; });
+
+// helper
+function rand(min,max){ return Math.random()*(max-min)+min; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+// damage floating texts
+class DText { constructor(x,y,val,color='yellow'){ this.x=x; this.y=y; this.v=val; this.t=0; this.color=color; } update(){ this.y -= 0.5; this.t++; } draw(){ ctx.font='16px sans-serif'; ctx.fillStyle=this.color; ctx.fillText((this.v>0?'-':'')+Math.abs(this.v), this.x, this.y); } }
+
+// Food
+class Food {
+  constructor(x,y,amount=8){ this.x=x; this.y=y; this.size=7; this.amount=amount; this.collected=false; }
+  draw(){
+    let bounce = Math.sin((Date.now()/200)+this.x)*2;
+    ctx.fillStyle='crimson';
+    ctx.beginPath(); ctx.ellipse(this.x, this.y + bounce, this.size, this.size*0.7, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle='darkred'; ctx.stroke();
+  }
+}
+
+// Barrier (placed by builder)
+class Barrier {
+  constructor(x,y,dur=900){ this.x=x; this.y=y; this.size=18; this.t=0; this.dur=dur; }
+  update(){ this.t++; if(this.t>=this.dur){ barriers.splice(barriers.indexOf(this),1); } }
+  draw(){ ctx.fillStyle='sienna'; ctx.beginPath(); ctx.rect(this.x-this.size, this.y-this.size/2, this.size*2, this.size); ctx.fill(); ctx.strokeStyle='black'; ctx.stroke(); }
+}
+
+// Egg (queen lays)
+class Egg {
+  constructor(x,y){ this.x=x; this.y=y; this.t=0; this.hatch = Math.max(300, 600 - upgrades.queenRate*40); }
+  update(){
+    this.t++;
+    if(this.t >= this.hatch){
+      const types = ['worker','soldier','scout','harvester','medic','defender','builder','fire','guardian'];
+      let type = types[Math.floor(Math.random()*types.length)];
+      let a = new Ant(this.x + rand(-20,20), this.y + rand(-20,20), type);
+      if(Math.random() < 0.18){ a.mutated = true; a.color = '#FFD700'; a.speed *= 1.25; a.maxHealth = Math.ceil(a.maxHealth * 1.5); a.health = a.maxHealth; }
+      ants.push(a);
+      if(['worker','soldier','scout','harvester','medic','defender','builder','fire','guardian'].includes(type)) playerControllable.push(a);
+      eggs.splice(eggs.indexOf(this),1);
+      playHatch();
+      spawnFloatingText(a.x, a.y-10, 'Hatched', '#fff');
+    }
+  }
+  draw(){
+    let grow = clamp(this.t / this.hatch, 0, 1);
+    ctx.fillStyle='orange'; ctx.beginPath(); ctx.ellipse(this.x, this.y, 6*grow+1, 8*grow+1, 0, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(0,0,0,0.3)'; ctx.stroke();
+  }
+}
+
+// Ant types
+class Ant {
+  constructor(x,y,type='worker'){
+    this.x = x; this.y = y; this.type = type;
+    this.size = (type==='queen'?15:10);
+    this.color = this.baseColor();
+    this.mutated = false;
+    this.carrying = false;
+    this.carryAmount = (type==='harvester'?2:1);
+    this.speed = (type==='scout'?2.6: type==='soldier'?1.6:1.4) + (upgrades.workerSpeed||0);
+    this.health = (type==='soldier'?6: type==='defender'?8: type==='fire'?2: type==='guardian'?10: type==='medic'?4:3);
+    this.maxHealth = this.health;
+    this.target = null;
+    this.attackPower = (type==='soldier'?1: type==='fire'?2:1) + (type==='guardian'?1:0);
+    // builder properties
+    this.builderCooldown = 0;
+  }
+  baseColor(){
+    switch(this.type){
+      case 'queen': return '#800080';
+      case 'soldier': return '#1e90ff';
+      case 'scout': return '#ffa500';
+      case 'harvester': return '#228B22';
+      case 'defender': return '#8B0000';
+      case 'medic': return '#00FF7F';
+      case 'builder': return '#808080';
+      case 'fire': return '#ff4500';
+      case 'guardian': return '#4b0082';
+      default: return '#8B4513';
+    }
+  }
+  update(){
+    if(this.type === 'queen') {
+      // queen stationary; maybe lay eggs if enough food (handled elsewhere)
+      return;
+    }
+    // builder places barriers occasionally
+    if(this.type === 'builder'){
+      if(this.builderCooldown > 0) this.builderCooldown--;
+      else if(Math.random() < 0.002){
+        barriers.push(new Barrier(this.x + rand(-20,20), this.y + rand(-10,10)));
+        this.builderCooldown = 1000;
+        spawnFloatingText(this.x, this.y-10, 'Built', '#ddd');
+      }
+      // builder otherwise acts like worker to gather food
+      if(!this.target || this.target.collected) this.target = foods.length ? foods[Math.floor(Math.random()*foods.length)] : null;
+      if(this.target) this.moveTowards(this.target.x, this.target.y);
+    }
+    // workers & harvester gather
+    if(this.type==='worker' || this.type==='harvester' || this.type==='builder'){
+      if(!this.target || this.target.collected) this.target = foods.length ? foods[Math.floor(Math.random()*foods.length)] : null;
+      if(this.target){
+        this.moveTowards(this.target.x, this.target.y);
+        if(Math.hypot(this.x-this.target.x, this.y-this.target.y) < 10){
+          if(!this.target.collected){
+            this.target.collected = true;
+            colonyFood += this.carryAmount * this.target.amount;
+            score += this.carryAmount * this.target.amount;
+            playCollect();
+            spawnFloatingText(this.x, this.y-10, '+' + (this.carryAmount * this.target.amount), '#ffd54f');
+            this.target = null;
+            this.carrying = false;
+          }
+        }
+      }
+    }
+    // soldiers/guardian/defender attack
+    if(this.type==='soldier' || this.type==='defender' || this.type==='guardian' || this.type==='fire'){
+      let ne = getClosestEnemy(this);
+      if(ne){
+        // if low HP and is fire or soldier maybe retreat a bit randomly
+        if(this.type === 'fire' && this.health < this.maxHealth*0.4 && Math.random()<0.3){
+          // aggressive but low health; may not retreat
+        }
+        this.moveTowards(ne.x, ne.y);
+        if(Math.hypot(this.x - ne.x, this.y - ne.y) < this.size + ne.size + 4){
+          ne.takeDamage(this.attackPower + (this.mutated?1:0) + (this.type==='fire'?1:0) );
+          dmgTexts.push(new DText(ne.x, ne.y-6, 1, 'red'));
+        }
+      }
+    }
+    // scouts wander
+    if(this.type==='scout'){
+      if(!this.target || Math.random()<0.008) this.target = {x: rand(40,W-40), y: rand(40,H-40)};
+      if(this.target) this.moveTowards(this.target.x, this.target.y);
+    }
+    // medics heal passively (small)
+    if(this.type==='medic'){
+      for(let a of ants){
+        if(a !== this && Math.hypot(a.x-this.x,a.y-this.y) < 40 && a.health < a.maxHealth){
+          a.health = Math.min(a.maxHealth, a.health + 0.02);
+        }
+      }
+    }
+    // ensure inside bounds
+    this.x = clamp(this.x, 8, W-8);
+    this.y = clamp(this.y, 8, H-8);
+  }
+  moveTowards(tx,ty){
+    let dx = tx - this.x, dy = ty - this.y;
+    let d = Math.hypot(dx,dy);
+    if(d>0.5){ this.x += (dx/d) * this.speed; this.y += (dy/d) * this.speed;}
+  }
+  takeDamage(d){
+    this.health -= d;
+    dmgTexts.push(new DText(this.x, this.y-8, d, 'orange'));
+    if(this.health <= 0){
+      let idx = ants.indexOf(this); if(idx>=0) ants.splice(idx,1);
+      let ci = playerControllable.indexOf(this); if(ci>=0) playerControllable.splice(ci,1);
+      if(player === this){
+        if(playerControllable.length){
+          playerIndex = 0; player = playerControllable[0];
+          showMessage('Active ant died. Switching...');
+        } else {
+          player = null;
+          showMessage('Active ant died.');
+        }
+      }
+    }
+  }
+  draw(){
+    // body
+    ctx.fillStyle = this.color;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.stroke();
+    // center shading
+    ctx.fillStyle='rgba(0,0,0,0.12)'; ctx.beginPath(); ctx.arc(this.x, this.y, this.size*0.38,0,Math.PI*2); ctx.fill();
+    // health bar
+    let bw = this.size*2;
+    ctx.fillStyle = 'red';
+    ctx.fillRect(this.x - this.size, this.y - this.size - 8, bw * (this.health / this.maxHealth), 4);
+    ctx.strokeStyle='black'; ctx.strokeRect(this.x - this.size, this.y - this.size - 8, bw, 4);
+    // mutated glow
+    if(this.mutated){
+      ctx.strokeStyle = '#ffd70088'; ctx.beginPath(); ctx.arc(this.x, this.y, this.size+4, 0, Math.PI*2); ctx.stroke();
+    }
+  }
+}
+
+// Enemy
+class Enemy {
+  constructor(x,y,type='spider'){
+    this.x = x; this.y = y; this.type = type;
+    this.size = (type==='beetle'?14:10);
+    this.color = (type==='beetle'?'saddlebrown': type==='wasp'?'goldenrod':'darkred');
+    this.maxHealth = (type==='beetle'?6: type==='wasp'?2: 3);
+    this.health = this.maxHealth;
+    this.speed = (type==='beetle'?0.6: type==='wasp'?2.2: 1.0);
+    this.damage = 1;
+    this.mutated = false;
+  }
+  update(){
+    if(ants.length===0) return;
+    // avoid barriers: simple repulsion if near a barrier
+    for(let b of barriers){
+      let dx = this.x - b.x, dy = this.y - b.y;
+      let d = Math.hypot(dx,dy);
+      if(d < b.size + this.size + 6){
+        // push away
+        this.x += (dx/d) * 1.2;
+        this.y += (dy/d) * 1.2;
+      }
+    }
+    // move toward nearest ant (prefer queen)
+    let target = ants.find(a=>a.type==='queen') || ants[Math.floor(Math.random()*ants.length)];
+    let dx = target.x - this.x, dy = target.y - this.y;
+    let d = Math.hypot(dx,dy);
+    if(d>0.5){ this.x += (dx/d) * this.speed; this.y += (dy/d) * this.speed; }
+    if(d < this.size + target.size + 2){
+      target.takeDamage(this.damage);
+      dmgTexts.push(new DText(target.x, target.y, this.damage, 'orange'));
+    }
+  }
+  takeDamage(d){
+    this.health -= d;
+    dmgTexts.push(new DText(this.x, this.y, d, 'red'));
+    if(this.health <= 0){
+      // drop food sometimes
+      if(Math.random() < 0.5) foods.push(new Food(this.x + rand(-12,12), this.y + rand(-12,12), 8));
+      let i = enemies.indexOf(this); if(i>=0) enemies.splice(i,1);
+      score += 5;
+    }
+  }
+  draw(){
+    let bob = Math.sin(Date.now()/160 + this.x) * 2;
+    ctx.fillStyle = this.color;
+    ctx.beginPath(); ctx.arc(this.x, this.y + bob, this.size, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle='black'; ctx.stroke();
+    // health bar
+    ctx.fillStyle='red'; ctx.fillRect(this.x - this.size, this.y - this.size - 6, this.size*2 * (this.health / this.maxHealth), 4);
+    ctx.strokeStyle='black'; ctx.strokeRect(this.x - this.size, this.y - this.size - 6, this.size*2, 4);
+    if(this.mutated){ ctx.strokeStyle='#80000066'; ctx.beginPath(); ctx.arc(this.x, this.y, this.size+4, 0, Math.PI*2); ctx.stroke(); }
+  }
+}
+
+// utility: find closest enemy to a given ant
+function getClosestEnemy(from){
+  if(enemies.length===0) return null;
+  let best = enemies[0], bd = Math.hypot(enemies[0].x - from.x, enemies[0].y - from.y);
+  for(let e of enemies){
+    let d = Math.hypot(e.x - from.x, e.y - from.y);
+    if(d < bd){ bd = d; best = e; }
+  }
+  return best;
+}
+
+// spawn logic (waves)
+let waveTimer = 0;
+let waveInterval = 1800; // frames (~30s at 60fps)
+function maybeSpawnWave(){
+  waveTimer++;
+  nextWaveIn = Math.max(0, waveInterval - waveTimer);
+  if(waveTimer >= waveInterval){
+    // start wave
+    wave++;
+    waveTimer = 0;
+    playWaveStart();
+    spawnWave(wave);
+    showMessage('Wave ' + wave + ' started!', 2000);
+  }
+}
+
+// spawn single wave
+function spawnWave(n){
+  // Base counts scale
+  let count = 3 + Math.floor(n * 1.5);
+  for(let i=0;i<count;i++){
+    let t = Math.random() < 0.6 ? 'spider' : (Math.random()<0.5 ? 'beetle' : 'wasp');
+    let e = new Enemy(rand(60, W-60), rand(60, H-60), t);
+    if(Math.random() < Math.min(0.18, n*0.02)){ e.mutated = true; e.maxHealth *= 1.6; e.health = e.maxHealth; e.speed *= 1.15; }
+    enemies.push(e);
+  }
+  // occasional boss every few waves
+  if(n % 4 === 0){
+    let boss = new Enemy(rand(120, W-120), rand(120, H-120), 'beetle');
+    boss.maxHealth *= 3.5; boss.health = boss.maxHealth; boss.size *= 1.6; boss.mutated = true; boss.damage = 2;
+    enemies.push(boss);
+    showMessage('Boss incoming!', 2200);
+  }
+}
+
+// floating messages
+function spawnFloatingText(x,y,txt,color='#fff'){
+  dmgTexts.push(new DText(x,y,txt,color));
+}
+
+// SOUND: enable AudioCtx on first click (browsers require user gesture)
+let startedAudio = false;
+function ensureAudioStarted(){
+  if(!startedAudio){
+    try{ audioCtx.resume(); }catch(e){}
+    startedAudio = true;
+  }
+}
+
+// start / init game
+function startGame(){
+  ensureAudioStarted();
+  ants = []; enemies = []; foods = []; eggs = []; dmgTexts = []; barriers = [];
+  playerControllable = []; playerIndex = 0; player = null;
+  colonyFood = 0; score = 0; wave = 0; waveTimer = 0; timer = 0;
+  upgrades = { queenRate:0, workerSpeed:0, soldierAtk:0, playerAtk:0 };
+  // queen
+  let q = new Ant(W/2, H/2, 'queen'); q.size = 18; q.maxHealth = 18; q.health = 18;
+  ants.push(q);
+  // player initial ant (worker)
+  let p = new Ant(W/2 + 60, H/2, 'worker'); ants.push(p); playerControllable.push(p); player = p; playerIndex = 0;
+  // initial food & enemies
+  for(let i=0;i<10;i++) foods.push(new Food(rand(80,W-80), rand(80,H-80)));
+  for(let i=0;i<3;i++) enemies.push(new Enemy(rand(60,W-60), rand(60,H-60), 'spider'));
+  gameState = 'playing';
+  showMessage('Game started — protect the Queen!');
+}
+
+// handle upgrades panel button clicks
+panelUpgrades.querySelectorAll('button').forEach((btn, idx)=>{
+  btn.onclick = ()=>{
+    const keys = ['queenRate','workerSpeed','soldierAtk','playerAtk'];
+    const costs = { queenRate:40, workerSpeed:25, soldierAtk:30, playerAtk:20 };
+    const up = keys[idx];
+    const cost = costs[up];
+    if(colonyFood < cost){ showMessage('Not enough colony food', 1200); return; }
+    colonyFood -= cost;
+    upgrades[up] = (upgrades[up] || 0) + 1;
+    if(up === 'workerSpeed'){ ants.forEach(a=>{ if(a.type==='worker') a.speed += 0.3; }); showMessage('Worker speed +0.3'); }
+    if(up === 'queenRate'){ showMessage('Queen fertility increased'); }
+    if(up === 'soldierAtk'){ showMessage('Soldier attack +1'); }
+    if(up === 'playerAtk'){ showMessage('Player attack +1'); }
+  };
+});
+
+// input bindings for abilities
+window.addEventListener('keydown', (e)=>{
+  ensureAudioStarted();
+  // space attack
+  if(e.key === ' ' && gameState === 'playing' && player){
+    // small cooldown handled by simple timestamp, but to keep simple allow pressing
+    attackAction();
+  }
+  // dash: Shift
+  if(e.key === 'Shift' && gameState==='playing' && player){
+    dashAction();
+  }
+  // pulse: e
+  if(e.key === 'e' && gameState==='playing' && player){
+    pulseAction();
+  }
+  // quick switch 1..6
+  if(['1','2','3','4','5','6'].includes(e.key) && gameState==='playing'){
+    const idx = parseInt(e.key)-1;
+    if(playerControllable[idx]) { playerIndex = idx; player = playerControllable[idx]; showMessage('Switched to ' + player.type, 700); }
+  }
+});
+
+// ability implementations (light cooldowns via timestamp)
+let lastAttack = 0, lastDash = 0, lastPulse = 0;
+function attackAction(){
+  const now = performance.now();
+  if(now - lastAttack < 200) return;
+  lastAttack = now;
+  // damage near enemies
+  let power = 1 + (upgrades.playerAtk || 0);
+  if(player){
+    for(let e of enemies.slice()){
+      if(Math.hypot(e.x - player.x, e.y - player.y) < player.size + e.size + 12){
+        e.takeDamage(power);
+        playAttack();
+      }
+    }
+    dmgTexts.push(new DText(player.x, player.y - 6, 0, '#fff'));
+  }
+}
+function dashAction(){
+  const now = performance.now();
+  if(now - lastDash < 800) return;
+  lastDash = now;
+  if(!player) return;
+  // dash in direction of movement keys
+  let dx = 0, dy = 0;
+  if(keys['w']||keys['ArrowUp']) dy -= 1;
+  if(keys['s']||keys['ArrowDown']) dy += 1;
+  if(keys['a']||keys['ArrowLeft']) dx -= 1;
+  if(keys['d']||keys['ArrowRight']) dx += 1;
+  if(dx===0 && dy===0) return;
+  let d = Math.hypot(dx,dy);
+  const dist = 100;
+  player.x += (dx/d) * dist; player.y += (dy/d) * dist;
+  // damage enemies in path
+  for(let e of enemies.slice()){
+    if(Math.hypot(e.x - player.x, e.y - player.y) < player.size + e.size + 8){ e.takeDamage(2 + (upgrades.playerAtk || 0)); playAttack(); }
+  }
+  playTone(260, 0.08, 'square'); // small dash tone
+}
+function pulseAction(){
+  const now = performance.now();
+  if(now - lastPulse < 2000) return;
+  lastPulse = now;
+  if(!player) return;
+  let r = 110;
+  for(let e of enemies.slice()){
+    if(Math.hypot(e.x - player.x, e.y - player.y) <= r){ e.takeDamage(2 + (upgrades.playerAtk || 0)); }
+  }
+  playTone(520, 0.18, 'sine'); playTone(780, 0.14, 'triangle');
+  for(let i=0;i<10;i++) dmgTexts.push(new DText(player.x + rand(-r,r), player.y + rand(-r,r), 0, '#ffd54f'));
+  showMessage('Pulse!', 700);
+}
+
+// generic playTone used in dash/pulse
+function playTone(freq, dur=0.12, type='sine', vol=0.28){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.value = vol;
+  o.connect(g); g.connect(sfxGain);
+  o.start();
+  g.gain.setValueAtTime(vol, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+  o.stop(audioCtx.currentTime + dur + 0.02);
+}
+
+// playCollect/Attack/Hatch/Wave uses earlier helper functions
+function playCollect(){ playTone(880,0.09,'sawtooth',0.25); playTone(1320,0.06,'sine',0.18); }
+function playAttack(){ playTone(220,0.08,'square',0.28); }
+function playHatch(){ playTone(600,0.22,'sine',0.25); playTone(900,0.18,'triangle',0.18); }
+function playWaveStart(){ playTone(160,0.5,'sine',0.25); playTone(260,0.5,'sine',0.16); }
+
+// spawn helper: periodic enemy/food spawn tasks
+function spawnTick(){
+  // spawn small random enemy occasionally outside barrier influence
+  if(Math.random() < 0.015) enemies.push(new Enemy(rand(40,W-40), rand(40,H-40), Math.random()<0.6?'spider':'beetle'));
+  // spawn food sometimes
+  if(Math.random() < 0.02) foods.push(new Food(rand(40,W-40), rand(40,H-40), 8));
+}
+
+// spawn initial "demo" items in menu state
+function spawnInitialMenu(){
+  foods = []; enemies = []; ants = []; eggs = []; dmgTexts = []; barriers = [];
+  for(let i=0;i<8;i++) foods.push(new Food(rand(80,W-80), rand(80,H-80)));
+  // queen & one worker visible as preview
+  ants.push(new Ant(W/2, H/2, 'queen'));
+  let p = new Ant(W/2+60, H/2, 'worker'); ants.push(p);
+  playerControllable = [p]; player = p; playerIndex = 0;
+  enemies.push(new Enemy(rand(80,W-80), rand(80,H-80), 'spider'));
+}
+spawnInitialMenu();
+
+// main animation loop
+let last = performance.now();
+let nextWaveIn = waveInterval = 1800;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = (now - last) / 16.666;
+  last = now;
+  if(gameState !== 'playing'){
+    // draw paused/menu scene
+    ctx.clearRect(0,0,W,H);
+    // simple background
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#d9b77a'); g.addColorStop(1,'#7c4a2f');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    // draw entities lightly
+    for(let f of foods) f.draw();
+    for(let a of ants) a.draw();
+    for(let e of enemies) e.draw();
+    return;
+  }
+
+  timer++;
+  // periodic spawn
+  spawnAccumulator++;
+  if(spawnAccumulator % 30 === 0) spawnTick();
+
+  // waves
+  waveTimer++;
+  nextWaveIn = Math.max(0, waveInterval - waveTimer);
+  if(waveTimer >= waveInterval){
+    wave++; waveTimer = 0; maybeSpawnWave(); playWaveStart();
+  }
+
+  // update entities
+  for(let b of barriers) b.update();
+  for(let a of ants) a.update();
+  for(let e of enemies) e.update();
+  for(let i=eggs.length-1;i>=0;i--) eggs[i].update();
+  for(let i=dmgTexts.length-1;i>=0;i--){ dmgTexts[i].update(); if(dmgTexts[i].t > 60) dmgTexts.splice(i,1); }
+
+  // player movement strictly when keys pressed (fix drift)
+  if(player){
+    let dx = 0, dy = 0;
+    if(keys['w'] || keys['ArrowUp']) dy -= 1;
+    if(keys['s'] || keys['ArrowDown']) dy += 1;
+    if(keys['a'] || keys['ArrowLeft']) dx -= 1;
+    if(keys['d'] || keys['ArrowRight']) dx += 1;
+    if(dx !== 0 || dy !== 0){
+      let d = Math.hypot(dx,dy);
+      player.x += (dx/d) * player.speed;
+      player.y += (dy/d) * player.speed;
+    }
+  }
+
+  // rendering
+  ctx.clearRect(0,0,W,H);
+  // background gradient
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#d9b77a'); g.addColorStop(1,'#7c4a2f');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  // draw barriers
+  for(let b of barriers) b.draw();
+
+  // draw foods
+  for(let f of foods) if(!f.collected) f.draw();
+
+  // draw eggs
+  for(let eg of eggs) eg.draw();
+
+  // draw ants and enemies
+  for(let a of ants) a.draw();
+  for(let en of enemies) en.draw();
+
+  // draw dmg texts
+  for(let d of dmgTexts) d.draw();
+
+  // draw UI updates
+  activeAntEl.textContent = 'Active: ' + (player ? player.type.toUpperCase() : '—');
+  hpLineEl.textContent = player ? `HP: ${Math.round(player.health)}/${player.maxHealth}` : 'HP: —';
+  scoreEl.textContent = 'Score: ' + score;
+  colonyFoodEl.textContent = 'Colony Food: ' + Math.round(colonyFood);
+  antsCountEl.textContent = ants.length;
+  enemiesCountEl.textContent = enemies.length;
+  eggsCountEl.textContent = eggs.length;
+  waveCountEl.textContent = wave;
+  nextWaveTimerEl.textContent = Math.round(nextWaveIn/60) + 's';
+}
+
+// helper: maybe spawn wave internal
+function maybeSpawnWave(){
+  // spawn wave using spawnWave function defined earlier
+  spawnWave(wave);
+}
+
+// ensure audio context unlocked on first interaction
+window.addEventListener('pointerdown', ()=>{ if(audioCtx.state === 'suspended') audioCtx.resume(); }, { once:true });
+
+// initial loop start
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
