@@ -5,12 +5,11 @@
 <title>Ant Colony Adventure</title>
 <style>
 body {margin:0; overflow:hidden; font-family:Arial; background:#222;}
-canvas {display:block; margin:0 auto; background:#7c4a2f;}
-#ui {position:absolute; top:10px; left:10px; color:white; z-index:10;}
-#currentAnt, #colonyStats, #enemyStats, #controls {margin-bottom:5px;}
-#updatesBtn {position:absolute; top:10px; right:10px; padding:5px 10px; background:#444; color:white; cursor:pointer; border-radius:5px;}
-#updatesPanel {display:none; position:absolute; top:50px; right:10px; background:#333; color:white; padding:10px; border-radius:5px; max-width:300px;}
-#overlay {position:absolute;top:0;left:0;width:100%;height:100%;color:white;text-align:center;display:flex;justify-content:center;align-items:center;font-size:30px;}
+canvas {display:block; margin:0 auto; background:#5b3922;}
+#ui {position:absolute; top:10px; left:10px; color:white; z-index:10; font-size:14px;}
+#updatesBtn {position:absolute; top:10px; right:10px; padding:5px 10px; background:#444; color:white; border:none; cursor:pointer; border-radius:5px;}
+#updatesPanel {display:none; position:absolute; top:45px; right:10px; background:#333; color:white; padding:10px; border-radius:5px;}
+#overlay {position:absolute;top:0;left:0;width:100%;height:100%;display:flex;justify-content:center;align-items:center;color:white;font-size:32px;}
 </style>
 </head>
 <body>
@@ -19,115 +18,214 @@ canvas {display:block; margin:0 auto; background:#7c4a2f;}
   <div id="currentAnt"></div>
   <div id="colonyStats"></div>
   <div id="enemyStats"></div>
-  <div id="controls">Controls: Arrow/WASD = Move | Space = Attack | 1-6 = Switch Ant</div>
+  <div>Controls: WASD = Move | SPACE = Attack</div>
 </div>
-<div id="updatesBtn">Updates</div>
+<button id="updatesBtn">Updates</button>
 <div id="updatesPanel">
-<h3>Updates</h3>
-<ul>
-<li>Ant mutations</li>
-<li>Multiple enemy types</li>
-<li>Combat with damage numbers</li>
-<li>Egg hatching & colony management</li>
-<li>Responsive scaling</li>
-</ul>
+  <h3>New Features</h3>
+  <ul>
+    <li>Health bars for ants & enemies</li>
+    <li>Dynamic enemy spawning</li>
+    <li>Queen lays eggs</li>
+    <li>Expanded UI</li>
+  </ul>
 </div>
-<div id="overlay"></div>
+<div id="overlay">Press ENTER to Start</div>
+
 <script>
-const canvas=document.getElementById('game');
-const ctx=canvas.getContext('2d');
-const currentAntDiv=document.getElementById('currentAnt');
-const statsDiv=document.getElementById('colonyStats');
-const enemyDiv=document.getElementById('enemyStats');
-const updatesBtn=document.getElementById('updatesBtn');
-const updatesPanel=document.getElementById('updatesPanel');
-const overlay=document.getElementById('overlay');
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+let W=window.innerWidth,H=window.innerHeight;
+canvas.width=W; canvas.height=H;
 
-let baseWidth=800, baseHeight=600, scale=1;
-function resize(){ scale=Math.min(window.innerWidth/baseWidth, window.innerHeight/baseHeight); canvas.width=baseWidth*scale; canvas.height=baseHeight*scale;}
-window.addEventListener('resize',resize);
-resize();
+let keys={},gameState="menu";
+let ants=[],enemies=[],foods=[],eggs=[],damageTexts=[];
+let player,colonyFood=0,score=0,timer=0;
 
-let gameState='menu';
-let keys={};
-document.addEventListener('keydown',e=>keys[e.key]=true);
-document.addEventListener('keyup',e=>keys[e.key]=false);
-updatesBtn.onclick=()=>{ updatesPanel.style.display=updatesPanel.style.display==='none'?'block':'none'; };
+document.addEventListener("keydown",e=>keys[e.key]=true);
+document.addEventListener("keyup",e=>keys[e.key]=false);
+window.addEventListener("resize",()=>{W=window.innerWidth;H=window.innerHeight;canvas.width=W;canvas.height=H;});
 
-let ants=[], enemies=[], foods=[], eggs=[], damages=[];
-let player; 
-let playerControllableAnts=[];
-let playerAntIndex=0;
-let colonyFood=0, score=0, gameTime=0;
+document.getElementById("updatesBtn").onclick=()=>{
+  let p=document.getElementById("updatesPanel");
+  p.style.display=p.style.display==="none"?"block":"none";
+};
 
-// --- Damage Text ---
-class DamageText{ constructor(x,y,amount){ this.x=x; this.y=y; this.amount=amount; this.timer=0; } update(){ this.y-=0.3; this.timer++; } draw(){ ctx.fillStyle='red'; ctx.font='16px Arial'; ctx.fillText(this.amount,this.x*scale,this.y*scale); }}
-
-// --- Food ---
-class Food{ constructor(x,y){ this.x=x; this.y=y; this.size=5; this.collected=false; } draw(){ let bounce=Math.sin(Date.now()/100 + this.x)*2; ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(this.x*scale,(this.y+bounce)*scale,this.size*scale,0,Math.PI*2); ctx.fill(); }}
-
-// --- Egg ---
-class Egg{ constructor(){ this.x=baseWidth/2 + (Math.random()*40-20); this.y=baseHeight/2 + (Math.random()*40-20); this.size=5; this.timer=0; this.hatchTime=600; } 
-update(){ this.timer++; if(this.timer>=this.hatchTime){ 
-let types=['worker','soldier','scout','harvester','medic','defender']; let type=types[Math.floor(Math.random()*types.length)]; 
-let ant=new Ant(this.x,this.y,type); 
-if(Math.random()<0.2){ ant.mutated=true; ant.color='#FFD700'; ant.speed*=1.2; ant.carryCapacity=(ant.carryCapacity||1)*2; } 
-ants.push(ant); 
-if(['worker','soldier','scout','harvester','medic','defender'].includes(ant.type)) playerControllableAnts.push(ant);
-eggs.splice(eggs.indexOf(this),1); } } 
-draw(){ let grow=Math.min(this.timer/this.hatchTime,1); ctx.fillStyle='orange'; ctx.beginPath(); ctx.arc(this.x*scale,this.y*scale,this.size*scale*grow,0,Math.PI*2); ctx.fill(); }}
-
-// --- Ant ---
-class Ant{ 
-constructor(x,y,type='worker'){ 
-this.x=x; this.y=y; this.type=type; this.size=type==='queen'?15:10; 
-this.speed=(type==='soldier'?2:type==='scout'?3:type==='harvester'?1.8:type==='defender'?1:1.5); 
-this.carryCapacity=(type==='harvester'?2:1); this.target=null; this.mutated=false; this.color=this.getColor(); this.health=3; this.maxHealth=3; this.carrying=false; 
-if(type==='soldier'){ this.health=5; this.maxHealth=5;}
-if(type==='defender'){ this.health=6; this.maxHealth=6;}
-if(type==='medic'){ this.health=4; this.maxHealth=4;}
-}
-getColor(){ switch(this.type){case 'worker':return '#8B4513';case 'soldier':return '#1e90ff';case 'scout':return '#ffa500';case 'queen':return '#800080';case 'harvester':return '#228B22';case 'defender':return '#8B0000';case 'medic':return '#00FF7F';default:return '#333';}}
-move(){ 
-if(this.type==='queen') return; 
-if(this.type==='worker'||this.type==='harvester'){ 
-if(!this.target || this.target.collected) this.target=foods[Math.floor(Math.random()*foods.length)]||null; 
-if(this.target){ this.goTo(this.target.x,this.target.y); if(this.getDistance(this.target)<5){ this.target.collected=true; colonyFood+=this.carryCapacity*5; score+=this.carryCapacity*5; this.target=null;}}
-} 
-if(this.type==='soldier'||this.type==='defender'){ let c=this.getClosestEnemy(); if(c){ this.goTo(c.x,c.y); if(this.getDistance(c)<this.size+c.size){ c.takeDamage(1); damages.push(new DamageText(c.x,c.y,1));}}} 
-if(this.type==='scout'){ if(Math.random()<0.01) this.target={x:Math.random()*baseWidth,y:Math.random()*baseHeight}; if(this.target) this.goTo(this.target.x,this.target.y);}}
-goTo(tx,ty){ let dx=tx-this.x,dy=ty-this.y,dist=Math.sqrt(dx*dx+dy*dy); if(dist>0){ this.x+=(dx/dist)*this.speed; this.y+=(dy/dist)*this.speed;}}
-getDistance(obj){ return Math.sqrt((obj.x-this.x)**2+(obj.y-this.y)**2);}
-getClosestEnemy(){ if(enemies.length===0) return null; let c=enemies[0],d=this.getDistance(c); for(let e of enemies){ let dist=this.getDistance(e); if(dist<d){ d=dist; c=e; }} return c;}
-draw(){ 
-ctx.fillStyle=this.color; ctx.beginPath(); ctx.arc(this.x*scale,this.y*scale,this.size*scale,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.stroke();
-// Health bar
-const barWidth=this.size*2*scale; const barHeight=4; const healthRatio=this.health/this.maxHealth;
-ctx.fillStyle='red'; ctx.fillRect((this.x-this.size)*scale,(this.y-this.size-6)*scale,barWidth*healthRatio,barHeight);
-ctx.strokeStyle='black'; ctx.strokeRect((this.x-this.size)*scale,(this.y-this.size-6)*scale,barWidth,barHeight);
-}
+// ===== CLASSES =====
+class Food{
+  constructor(x,y){this.x=x;this.y=y;this.size=6;this.collected=false;}
+  draw(){
+    ctx.fillStyle="red";
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fill();
+  }
 }
 
-// --- Enemy ---
-class Enemy{ constructor(x,y,type='spider'){ this.x=x; this.y=y; this.type=type; this.maxHealth=(type==='spider'?1:type==='beetle'?3:type==='wasp'?1:6); this.health=this.maxHealth; this.size=(type==='beetle'?15:type==='wasp'?10:12); this.speed=(type==='beetle'?0.8:type==='wasp'?3:1.2); this.damage=1; this.mutated=false; }
-move(){ if(ants.length===0) return; let t=ants[Math.floor(Math.random()*ants.length)]; let dx=t.x-this.x, dy=t.y-this.y, dist=Math.sqrt(dx*dx+dy*dy); this.x+=(dx/dist)*this.speed; this.y+=(dy/dist)*this.speed; if(dist<this.size+t.size){ t.health-=this.damage; damages.push(new DamageText(t.x,t.y,this.damage)); if(t.health<=0) ants.splice(ants.indexOf(t),1);}}
-draw(){ let bob=Math.sin(Date.now()/200)*2; ctx.fillStyle=this.mutated?'#800000':(this.type==='spider'?'darkred':this.type==='beetle'?'brown':'yellow'); ctx.beginPath(); ctx.arc(this.x*scale,(this.y+bob)*scale,this.size*scale,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='black'; ctx.stroke(); ctx.fillStyle='red'; let barW=this.size*scale*2*(this.health/this.maxHealth); ctx.fillRect((this.x-this.size)*scale,(this.y-this.size-5)*scale,barW,4); ctx.strokeStyle='black'; ctx.strokeRect((this.x-this.size)*scale,(this.y-this.size-5)*scale,this.size*scale*2,4);}
-takeDamage(a){ this.health-=a; damages.push(new DamageText(this.x,this.y,a)); if(this.health<=0) enemies.splice(enemies.indexOf(this),1);}
+class Egg{
+  constructor(x,y){this.x=x;this.y=y;this.timer=0;this.hatch=300;}
+  update(){
+    this.timer++;
+    if(this.timer>=this.hatch){
+      let t=Math.random()<0.5?"worker":"soldier";
+      ants.push(new Ant(this.x+Math.random()*20-10,this.y+Math.random()*20-10,t));
+      eggs.splice(eggs.indexOf(this),1);
+    }
+  }
+  draw(){
+    ctx.fillStyle="orange";
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,5,0,Math.PI*2);
+    ctx.fill();
+  }
 }
 
-function spawnEnemy(type='spider'){ let e=new Enemy(Math.random()*baseWidth,Math.random()*baseHeight,type); if(Math.random()<0.15){ e.mutated=true; e.color='#800000'; e.maxHealth*=1.5; e.health=e.maxHealth; e.speed*=1.2;} enemies.push(e); }
+class Ant{
+  constructor(x,y,type){
+    this.x=x;this.y=y;this.type=type;
+    this.size=type==="queen"?14:8;
+    this.color=type==="queen"?"purple":(type==="soldier"?"blue":"brown");
+    this.speed=type==="scout"?3:1.5;
+    this.health=type==="soldier"?5:3;
+    this.maxHealth=this.health;
+  }
+  move(){
+    if(this===player){
+      if(keys["w"]) this.y-=this.speed;
+      if(keys["s"]) this.y+=this.speed;
+      if(keys["a"]) this.x-=this.speed;
+      if(keys["d"]) this.x+=this.speed;
+    }
+  }
+  attack(){
+    for(let e of enemies){
+      let dx=e.x-this.x,dy=e.y-this.y;
+      if(Math.hypot(dx,dy)<20){
+        e.health--;
+        damageTexts.push({x:e.x,y:e.y,val:1,time:0});
+        if(e.health<=0) enemies.splice(enemies.indexOf(e),1);
+      }
+    }
+  }
+  draw(){
+    ctx.fillStyle=this.color;
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fill();
 
-function initGame(){ 
-  ants=[]; enemies=[]; foods=[]; eggs=[]; damages=[]; colonyFood=0; score=0; gameTime=0;
-  playerControllableAnts=[];
-  playerAntIndex=0;
-  ants.push(new Ant(baseWidth/2, baseHeight/2, 'queen')); 
-  player = new Ant(baseWidth/2 + 50, baseHeight/2, 'worker');
-  playerControllableAnts.push(player);
-  for(let i=0;i<10;i++) foods.push(new Food(Math.random()*baseWidth, Math.random()*baseHeight));
-  gameState='playing'; overlay.style.display='none';
+    // health bar
+    let barW=this.size*2;
+    ctx.fillStyle="red";
+    ctx.fillRect(this.x-this.size,this.y-this.size-6,barW*(this.health/this.maxHealth),3);
+    ctx.strokeStyle="black";
+    ctx.strokeRect(this.x-this.size,this.y-this.size-6,barW,3);
+  }
 }
 
-document.addEventListener('keydown', e=>{
-  if(gameState==='menu' && e.key==='Enter') initGame();
-  if(gameState==='playing' && ['1','2','3','
+class Enemy{
+  constructor(x,y,type){
+    this.x=x;this.y=y;this.type=type;
+    this.size=10;
+    this.color=type==="spider"?"darkred":"green";
+    this.health=type==="beetle"?4:2;
+    this.maxHealth=this.health;
+    this.speed=type==="beetle"?0.6:1.2;
+  }
+  update(){
+    if(ants.length===0) return;
+    let t=ants[0];
+    let dx=t.x-this.x,dy=t.y-this.y;
+    let d=Math.hypot(dx,dy);
+    if(d>1){this.x+=dx/d*this.speed;this.y+=dy/d*this.speed;}
+    if(d<15){
+      t.health--;
+      damageTexts.push({x:t.x,y:t.y,val:1,time:0});
+      if(t.health<=0) ants.splice(ants.indexOf(t),1);
+    }
+  }
+  draw(){
+    ctx.fillStyle=this.color;
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fill();
+    // health bar
+    ctx.fillStyle="red";
+    ctx.fillRect(this.x-this.size,this.y-this.size-5,this.size*2*(this.health/this.maxHealth),3);
+    ctx.strokeStyle="black";
+    ctx.strokeRect(this.x-this.size,this.y-this.size-5,this.size*2,3);
+  }
+}
+
+// ===== GAME =====
+function spawnEnemy(){
+  let types=["spider","beetle"];
+  let type=types[Math.floor(Math.random()*types.length)];
+  enemies.push(new Enemy(Math.random()*W,Math.random()*H,type));
+}
+
+function spawnFood(){
+  foods.push(new Food(Math.random()*W,Math.random()*H));
+}
+
+function init(){
+  ants=[];enemies=[];foods=[];eggs=[];damageTexts=[];
+  let queen=new Ant(W/2,H/2,"queen");
+  ants.push(queen);
+  player=new Ant(W/2+40,H/2,"worker");
+  ants.push(player);
+  for(let i=0;i<10;i++) spawnFood();
+  colonyFood=0; score=0; timer=0;
+  gameState="play";
+  document.getElementById("overlay").style.display="none";
+}
+
+document.addEventListener("keydown",e=>{
+  if(e.key==="Enter" && gameState==="menu") init();
+  if(e.key===" " && player) player.attack();
+});
+
+function updateUI(){
+  let cAnt=`Active Ant: ${player.type} (${player.health}/${player.maxHealth})`;
+  let colony=`Colony Food: ${colonyFood} | Ants: ${ants.length} | Eggs: ${eggs.length}`;
+  let enemy=`Enemies: ${enemies.length}`;
+  document.getElementById("currentAnt").innerText=cAnt;
+  document.getElementById("colonyStats").innerText=colony;
+  document.getElementById("enemyStats").innerText=enemy;
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  ctx.clearRect(0,0,W,H);
+  if(gameState==="menu") return;
+  timer++;
+
+  // Spawning
+  if(timer%200===0) spawnFood();
+  if(timer%120===0) spawnEnemy();
+  if(timer%600===0) eggs.push(new Egg(W/2,H/2));
+
+  // Update
+  for(let e of enemies) e.update();
+  for(let a of ants) a.move();
+  for(let egg of eggs) egg.update();
+
+  // Draw
+  for(let f of foods) f.draw();
+  for(let egg of eggs) egg.draw();
+  for(let a of ants) a.draw();
+  for(let e of enemies) e.draw();
+
+  damageTexts.forEach(d=>{
+    ctx.fillStyle="yellow";
+    ctx.font="14px Arial";
+    ctx.fillText("-"+d.val,d.x,d.y);
+    d.y-=0.5; d.time++;
+  });
+  damageTexts=damageTexts.filter(d=>d.time<40);
+
+  updateUI();
+}
+loop();
+</script>
+</body>
+</html>
